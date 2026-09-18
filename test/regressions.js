@@ -298,10 +298,10 @@ process.exit(0);
 
   console.log('\nfire tv app');
 
-  // The Kotlin can't run in Node, so this hands off to the JVM test that starts
-  // the real ControlServer and pairs two phones against it over HTTP. No JDK is
-  // a failure, not a skip: a check that quietly passes proves nothing.
-  await check('two paired phones each add a title, and neither sees the other’s', () => {
+  // The Kotlin can't run in Node, so these hand off to JVM tests in
+  // firetv/app/src/test. No JDK is a failure, not a skip: a check that quietly
+  // passes proves nothing.
+  const jvmTest = (testClass) => {
     const { spawnSync } = require('child_process');
     const firetv = path.join(__dirname, '..', 'firetv');
     // Not Android Studio's bundled Java: recent versions ship Java 25, which
@@ -314,12 +314,18 @@ process.exit(0);
     const win = process.platform === 'win32';
     const run = spawnSync(
       win ? `"${path.join(firetv, 'gradlew.bat')}"` : path.join(firetv, 'gradlew'),
-      [':app:testDebugUnitTest', '--tests', 'com.felix.streamhub.PerPhoneListsTest', '-q'],
+      [':app:testDebugUnitTest', '--tests', `com.felix.streamhub.${testClass}`, '-q'],
       { cwd: firetv, shell: win, encoding: 'utf8', timeout: 600000 }
     );
     const out = `${run.stdout || ''}${run.stderr || ''}`;
     assert.strictEqual(run.status, 0, out.split('\n').filter((l) => /FAILED|error|expected/i.test(l)).slice(0, 6).join(' | ') || out.slice(-400));
-  });
+  };
+
+  // Starts the real ControlServer and pairs two phones against it over HTTP.
+  await check('two paired phones each add a title, and neither sees the other’s', () => jvmTest('PerPhoneListsTest'));
+
+  // Found on a real Fire TV: HBO Max and Prime Video are TV-launcher-only apps.
+  await check('TV-only apps (HBO Max, Prime Video) are found and opened', () => jvmTest('AppLauncherTest'));
 
   const failed = checks.filter((c) => !c).length;
   console.log(`\n${checks.length - failed}/${checks.length} checks passed`);

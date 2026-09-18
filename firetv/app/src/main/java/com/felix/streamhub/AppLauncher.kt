@@ -26,12 +26,34 @@ object AppLauncher {
         data class Failed(val reason: String) : Result()
     }
 
-    /** The first package of this service that is actually installed. */
+    /** The package of this service that the TV's own home screen would open. */
     fun installedPackage(context: Context, svc: Service): String? {
         val pm = context.packageManager
-        return svc.packages.firstOrNull { pkg ->
-            runCatching { pm.getLaunchIntentForPackage(pkg) != null }.getOrDefault(false)
-        }
+        return pickPackage(
+            svc.packages,
+            hasTvLauncher = { runCatching { pm.getLeanbackLaunchIntentForPackage(it) != null }.getOrDefault(false) },
+            hasLauncher = { runCatching { pm.getLaunchIntentForPackage(it) != null }.getOrDefault(false) }
+        )
+    }
+
+    /**
+     * TV launcher first, across all of a service's packages, then the phone
+     * launcher. getLaunchIntentForPackage alone misses TV-only apps: on a real
+     * Fire TV, HBO Max (com.hbo.hbonow) and Prime Video (com.amazon.firebat)
+     * register only LEANBACK_LAUNCHER, so HBO read as "not installed", and
+     * Prime resolved to com.amazon.avod, a background part of Prime with no
+     * TV entry point.
+     */
+    fun pickPackage(
+        packages: List<String>,
+        hasTvLauncher: (String) -> Boolean,
+        hasLauncher: (String) -> Boolean
+    ): String? = packages.firstOrNull(hasTvLauncher) ?: packages.firstOrNull(hasLauncher)
+
+    private fun homeIntent(context: Context, pkg: String): Intent? {
+        val pm = context.packageManager
+        return runCatching { pm.getLeanbackLaunchIntentForPackage(pkg) }.getOrNull()
+            ?: runCatching { pm.getLaunchIntentForPackage(pkg) }.getOrNull()
     }
 
     fun isInstalled(context: Context, serviceId: String): Boolean {
@@ -65,7 +87,7 @@ object AppLauncher {
         }
 
         // 3. the app's home screen
-        val launch = context.packageManager.getLaunchIntentForPackage(pkg)
+        val launch = homeIntent(context, pkg)
         if (launch != null) {
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             if (tryStart(context, launch)) return Result.Launched("home", pkg)

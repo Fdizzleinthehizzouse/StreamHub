@@ -12,3 +12,6 @@ firetv/app/build/
 firetv/local.properties
 firetv/.idea/
 *.apk
+
+# adb screen dumps - contain household profile names
+dumps/
