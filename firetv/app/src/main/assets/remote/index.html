@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#0b0d12" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="StreamHub" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>StreamHub Remote</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!-- pairing gate -->
+    <div id="pair" class="pair" hidden>
+      <div class="pair-card">
+        <div class="pair-mark">SH</div>
+        <h1>Pair with your TV</h1>
+        <p>Open StreamHub on your TV and type the six characters shown on screen.</p>
+        <input id="pair-code" maxlength="6" placeholder="ABC234" autocapitalize="characters" autocorrect="off" spellcheck="false" autocomplete="one-time-code" />
+        <button id="pair-go" class="btn primary big">Pair</button>
+        <div id="pair-err" class="pair-err"></div>
+      </div>
+    </div>
+
+    <!-- main app -->
+    <div id="app" hidden>
+      <header class="top">
+        <div class="top-row">
+          <button class="icon-btn" id="back-btn" hidden aria-label="Back">‹</button>
+          <div class="searchbox">
+            <span class="ico">⌕</span>
+            <input id="q" type="search" placeholder="Search all four services" autocomplete="off" enterkeyhint="search" />
+          </div>
+          <button class="icon-btn" id="settings-btn" aria-label="Settings">⚙</button>
+        </div>
+        <div id="tv-status" class="tv-status"></div>
+      </header>
+
+      <main id="view" class="view"></main>
+
+      <nav class="tabs">
+        <button class="tab active" data-view="home"><span>◎</span>Home</button>
+        <button class="tab" data-view="services"><span>▦</span>Services</button>
+        <button class="tab" data-view="watchlist"><span>＋</span>List<em id="wl-count"></em></button>
+      </nav>
+    </div>
+
+    <!-- title sheet -->
+    <div class="sheet-wrap" id="sheet-wrap" hidden>
+      <div class="sheet" id="sheet"></div>
+    </div>
+
+    <!-- settings -->
+    <div class="sheet-wrap" id="settings-wrap" hidden>
+      <div class="sheet">
+        <div style="position:relative">
+          <div class="sheet-grab"></div>
+          <button class="close" style="position:absolute;top:2px;right:11px" id="settings-close">✕</button>
+        </div>
+        <div class="sheet-body">
+          <h2>Settings</h2>
+          <p class="overview" style="margin-bottom:18px">
+            These live on your TV. You only need to do this once.
+          </p>
+
+          <div class="label">Film database key — required, free</div>
+          <input id="set-tmdb" class="setting-input" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your TMDB key" />
+          <p class="overview" style="font-size:12.5px;margin-top:8px">
+            Get one free at <a href="https://www.themoviedb.org/signup" target="_blank" rel="noreferrer">themoviedb.org</a> —
+            sign up, then Settings → API → copy the <strong>API Key (v3 auth)</strong>.
+          </p>
+
+          <div class="label">Ratings key — optional</div>
+          <input id="set-omdb" class="setting-input" type="text" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Paste your OMDb key" />
+          <p class="overview" style="font-size:12.5px;margin-top:8px">
+            Adds Rotten Tomatoes, IMDb and Metacritic scores.
+            Free at <a href="https://www.omdbapi.com/apikey.aspx" target="_blank" rel="noreferrer">omdbapi.com</a>.
+          </p>
+
+          <div class="label">Country</div>
+          <input id="set-region" class="setting-input" type="text" maxlength="2" autocapitalize="characters" placeholder="BE" />
+          <p class="overview" style="font-size:12.5px;margin-top:8px">
+            What's on each service differs by country. BE for Belgium, FR for France, NL for the Netherlands.
+          </p>
+
+          <button class="btn primary big" id="settings-save" style="margin-top:22px">Save</button>
+          <div id="settings-msg" class="overview" style="margin-top:14px;text-align:center"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

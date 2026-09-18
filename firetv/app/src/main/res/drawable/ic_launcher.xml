@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fire TV shows the banner on the home row; this icon is only for menus. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <gradient android:startColor="#6b8afd" android:endColor="#a855f7" android:angle="315" />
+            <corners android:radius="12dp" />
+        </shape>
+    </item>
+    <item android:gravity="center">
+        <shape android:shape="oval">
+            <size android:width="28dp" android:height="28dp" />
+            <solid android:color="#0b0d12" />
+        </shape>
+    </item>
+</layer-list>

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- A 10-foot UI needs bigger everything and a generous safe margin,
+         because TVs still overscan. -->
+    <dimen name="screen_margin">48dp</dimen>
+    <dimen name="card_width">150dp</dimen>
+    <dimen name="card_height">225dp</dimen>
+    <dimen name="row_gap">28dp</dimen>
+</resources>

@@ -1,0 +1,41 @@
+{
+  "name": "streamhub",
+  "productName": "StreamHub",
+  "version": "2.1.0",
+  "description": "One place for Netflix, Disney+, HBO Max and Prime Video",
+  "main": "src/main.js",
+  "author": "Felix",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/smoke.js && node test/firetv.js && node test/regressions.js && node test/remote.js && node test/tv-remote.js && node test/electron-boot.js",
+    "pack:win": "electron-builder --win zip --x64",
+    "dist:win": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.felix.streamhub",
+    "productName": "StreamHub",
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [
+        "zip"
+      ],
+      "signAndEditExecutable": false,
+      "artifactName": "StreamHub-${version}-win-x64.${ext}"
+    }
+  },
+  "dependencies": {
+    "qrcode-generator": "^2.0.4"
+  }
+}

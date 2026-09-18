@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">StreamHub</string>
+    <string name="search">Search</string>
+    <string name="setup">Setup</string>
+    <string name="attribution">Metadata by TMDB · availability by JustWatch · ratings by OMDb. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
+</resources>

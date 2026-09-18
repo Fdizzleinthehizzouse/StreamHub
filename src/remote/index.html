@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#0b0d12" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="StreamHub" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <title>StreamHub Remote</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <!-- pairing gate -->
+    <div id="pair" class="pair" hidden>
+      <div class="pair-card">
+        <div class="pair-mark">SH</div>
+        <h1>Pair with your PC</h1>
+        <p>Open StreamHub on your computer, go to <strong>TV &amp; Phone</strong>, and type the six digits shown there.</p>
+        <input id="pair-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="000000" autocomplete="one-time-code" />
+        <button id="pair-go" class="btn primary big">Pair</button>
+        <div id="pair-err" class="pair-err"></div>
+      </div>
+    </div>
+
+    <!-- main app -->
+    <div id="app" hidden>
+      <header class="top">
+        <div class="top-row">
+          <button class="icon-btn" id="back-btn" hidden aria-label="Back">‹</button>
+          <div class="searchbox">
+            <span class="ico">⌕</span>
+            <input id="q" type="search" placeholder="Search all four services" autocomplete="off" enterkeyhint="search" />
+          </div>
+          <button class="icon-btn" id="remote-btn" aria-label="TV remote">⌘</button>
+        </div>
+        <div id="tv-status" class="tv-status"></div>
+      </header>
+
+      <main id="view" class="view"></main>
+
+      <nav class="tabs">
+        <button class="tab active" data-view="home"><span>◎</span>Home</button>
+        <button class="tab" data-view="services"><span>▦</span>Services</button>
+        <button class="tab" data-view="watchlist"><span>＋</span>List<em id="wl-count"></em></button>
+      </nav>
+    </div>
+
+    <!-- title sheet -->
+    <div class="sheet-wrap" id="sheet-wrap" hidden>
+      <div class="sheet" id="sheet"></div>
+    </div>
+
+    <!-- d-pad remote -->
+    <div class="sheet-wrap" id="remote-wrap" hidden>
+      <div class="sheet remote-sheet">
+        <div class="sheet-grab"></div>
+        <h2>TV remote</h2>
+        <div class="dpad">
+          <button class="dk up" data-key="up">▲</button>
+          <button class="dk left" data-key="left">◀</button>
+          <button class="dk ok" data-key="select">OK</button>
+          <button class="dk right" data-key="right">▶</button>
+          <button class="dk down" data-key="down">▼</button>
+        </div>
+        <div class="rk-row">
+          <button class="rk" data-key="back">Back</button>
+          <button class="rk" data-key="home">Home</button>
+          <button class="rk" data-key="menu">Menu</button>
+        </div>
+        <div class="rk-row">
+          <button class="rk" data-key="rewind">⏪</button>
+          <button class="rk wide" data-key="playpause">⏯ Play / Pause</button>
+          <button class="rk" data-key="forward">⏩</button>
+        </div>
+        <button class="btn wide" id="remote-close">Close</button>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+test/shots/
+installer/app/
+*.log
+
+# Android
+firetv/.gradle/
+firetv/build/
+firetv/app/build/
+firetv/local.properties
+firetv/.idea/
+*.apk

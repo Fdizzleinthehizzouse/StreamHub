@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://image.tmdb.org data:; style-src 'self' 'unsafe-inline'; script-src 'self'" />
+    <title>StreamHub</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">SH</div>
+          <div class="brand-text">
+            <strong>StreamHub</strong>
+            <span>all four, one window</span>
+          </div>
+        </div>
+
+        <nav class="nav" id="nav-main">
+          <button class="nav-item" data-view="home"><span class="ico">◎</span>Home</button>
+          <button class="nav-item" data-view="search"><span class="ico">⌕</span>Search</button>
+          <button class="nav-item" data-view="watchlist"><span class="ico">＋</span>Watchlist<span class="badge" id="wl-count"></span></button>
+        </nav>
+
+        <div class="nav-label">Services</div>
+        <nav class="nav" id="nav-services"></nav>
+
+        <div class="sidebar-foot">
+          <button class="nav-item subtle" data-view="tv"><span class="ico">▭</span>TV &amp; Phone</button>
+          <button class="nav-item subtle" data-view="settings"><span class="ico">⚙</span>Settings</button>
+          <div class="browser-line" id="browser-line"></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div class="searchbox">
+            <span class="ico">⌕</span>
+            <input id="q" type="search" placeholder="Search across Netflix, Disney+, HBO Max and Prime Video…" autocomplete="off" spellcheck="false" />
+            <kbd>Ctrl K</kbd>
+          </div>
+          <div class="topbar-right" id="region-chip"></div>
+        </header>
+
+        <section class="view" id="view"></section>
+
+        <footer class="attribution">
+          <span>Metadata by <a href="#" data-ext="https://www.themoviedb.org/">TMDB</a> — this product uses the TMDB API but is not endorsed or certified by TMDB.</span>
+          <span>Streaming availability by <a href="#" data-ext="https://www.justwatch.com/">JustWatch</a>.</span>
+          <span>Ratings by <a href="#" data-ext="https://www.omdbapi.com/">OMDb</a>.</span>
+        </footer>
+      </main>
+    </div>
+
+    <div class="sheet-backdrop" id="sheet-backdrop" hidden>
+      <div class="sheet" id="sheet" role="dialog" aria-modal="true"></div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
