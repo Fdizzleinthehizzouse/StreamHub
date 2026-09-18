@@ -44,6 +44,12 @@ android {
     buildFeatures {
         viewBinding = false
     }
+
+    // The JVM tests start the real ControlServer. Android calls it makes along
+    // the way (Handler, PackageManager) just return defaults off-device.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -54,4 +60,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
     // Small, stable, single-artifact HTTP server for the PC/phone control link.
     implementation("org.nanohttpd:nanohttpd:2.3.1")
+
+    testImplementation("junit:junit:4.13.2")
+    // android.jar's org.json is a stub off-device; this is the real thing.
+    testImplementation("org.json:json:20240303")
 }

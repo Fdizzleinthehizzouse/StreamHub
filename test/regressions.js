@@ -296,6 +296,31 @@ process.exit(0);
     assert.strictEqual(tv._status, null);
   });
 
+  console.log('\nfire tv app');
+
+  // The Kotlin can't run in Node, so this hands off to the JVM test that starts
+  // the real ControlServer and pairs two phones against it over HTTP. No JDK is
+  // a failure, not a skip: a check that quietly passes proves nothing.
+  await check('two paired phones each add a title, and neither sees the other’s', () => {
+    const { spawnSync } = require('child_process');
+    const firetv = path.join(__dirname, '..', 'firetv');
+    // Not Android Studio's bundled Java: recent versions ship Java 25, which
+    // Gradle 8.7 cannot run on.
+    const javaHome = process.env.JAVA_HOME;
+    assert.ok(javaHome && fs.existsSync(javaHome), 'needs JAVA_HOME pointing at a JDK 17-21');
+
+    // Absolute and quoted: Windows may refuse to run a bare name from the
+    // current folder (NoDefaultCurrentDirectoryInExePath), and the path has spaces.
+    const win = process.platform === 'win32';
+    const run = spawnSync(
+      win ? `"${path.join(firetv, 'gradlew.bat')}"` : path.join(firetv, 'gradlew'),
+      [':app:testDebugUnitTest', '--tests', 'com.felix.streamhub.PerPhoneListsTest', '-q'],
+      { cwd: firetv, shell: win, encoding: 'utf8', timeout: 600000 }
+    );
+    const out = `${run.stdout || ''}${run.stderr || ''}`;
+    assert.strictEqual(run.status, 0, out.split('\n').filter((l) => /FAILED|error|expected/i.test(l)).slice(0, 6).join(' | ') || out.slice(-400));
+  });
+
   const failed = checks.filter((c) => !c).length;
   console.log(`\n${checks.length - failed}/${checks.length} checks passed`);
   process.exit(failed ? 1 : 0);

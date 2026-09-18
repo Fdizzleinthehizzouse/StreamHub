@@ -60,6 +60,8 @@ const server = http.createServer(async (req, res) => {
   calls.push({ path: p, method: req.method, body, query: Object.fromEntries(url.searchParams) });
 
   if (p === '/api/pair') {
+    // Same gate as the TV: no well-formed device id, no pairing.
+    if (!/^[a-f0-9]{32}$/.test(body.deviceId || '')) return send(400, { error: 'Reload the page and try again.' });
     if ((body.code || '').toUpperCase() !== CODE) return send(401, { error: 'Wrong code.' });
     token = 'tok-' + Math.random().toString(16).slice(2);
     return send(200, { token });
@@ -140,6 +142,9 @@ const server = http.createServer(async (req, res) => {
   await page.fill('#pair-code', CODE.toLowerCase()); // typed in lower case on a phone
   await page.waitForTimeout(900);
   check('the code works regardless of letter case', await page.locator('#app').isVisible());
+  const firstPair = calls.filter((c) => c.path === '/api/pair').pop();
+  const firstDevice = firstPair && firstPair.body.deviceId;
+  check('pairing tells the TV which phone this is', /^[a-f0-9]{32}$/.test(firstDevice || ''), JSON.stringify(firstPair && firstPair.body));
 
   await page.waitForTimeout(500);
   check('with no key yet, it points you at Settings', (await page.locator('#view').textContent()).toLowerCase().includes('cog'));
@@ -239,6 +244,18 @@ const server = http.createServer(async (req, res) => {
   await page.reload();
   await page.waitForTimeout(900);
   check('reloading keeps you paired', await page.locator('#app').isVisible());
+
+  // The re-pairing trap: a dead token must not cost the phone its identity,
+  // or the TV would hand it back an empty watchlist.
+  await page.evaluate(() => localStorage.setItem('streamhub.token', 'dead'));
+  await page.reload();
+  await page.waitForTimeout(1200);
+  check('a dead token sends you back to pairing', await page.locator('#pair').isVisible());
+  await page.fill('#pair-code', CODE);
+  await page.waitForTimeout(900);
+  const rePair = calls.filter((c) => c.path === '/api/pair').pop();
+  check('re-pairing presents the same device id', rePair && rePair.body.deviceId === firstDevice, `${firstDevice} vs ${rePair && rePair.body.deviceId}`);
+  check('and gets you back in', await page.locator('#app').isVisible());
 
   // an unreachable TV must offer a retry, not a dead screen
   server.close();

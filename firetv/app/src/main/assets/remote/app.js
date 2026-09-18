@@ -4,6 +4,23 @@
    The pairing token lives in this browser's storage. */
 
 const TOKEN_KEY = 'streamhub.token';
+const DEVICE_KEY = 'streamhub.device';
+
+/**
+ * Who this phone is, as opposed to its current login. The token is replaced on
+ * every pairing; this is not, so re-pairing finds the same watchlist. Never
+ * removed alongside the token. getRandomValues rather than randomUUID: the page
+ * is plain http on the LAN, and randomUUID only exists in secure contexts.
+ */
+function deviceId() {
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!/^[a-f0-9]{32}$/.test(id || '')) {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    id = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
 
 function el(tag, attrs = {}, ...kids) {
   const n = document.createElement(tag);
@@ -89,7 +106,7 @@ function showPairing(message) {
     }
     go.disabled = true;
     try {
-      const { token } = await api('/api/pair', { method: 'POST', body: { code } });
+      const { token } = await api('/api/pair', { method: 'POST', body: { code, deviceId: deviceId() } });
       localStorage.setItem(TOKEN_KEY, token);
       S.token = token;
       $('#pair').hidden = true;

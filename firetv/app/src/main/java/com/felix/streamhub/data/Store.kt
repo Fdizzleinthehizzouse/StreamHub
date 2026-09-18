@@ -6,13 +6,14 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Settings, watchlist, pinned titles and open history. SharedPreferences is
- * plenty for this much data and survives updates without a migration story.
+ * Settings, and each paired phone's watchlist, pinned titles and open history.
+ * SharedPreferences is plenty for this much data and survives updates without
+ * a migration story.
  */
-class Store(context: Context) {
+class Store(private val prefs: SharedPreferences) {
 
-    private val prefs: SharedPreferences =
-        context.applicationContext.getSharedPreferences("streamhub", Context.MODE_PRIVATE)
+    constructor(context: Context) :
+        this(context.applicationContext.getSharedPreferences("streamhub", Context.MODE_PRIVATE))
 
     // ---- settings ----------------------------------------------------------
 
@@ -77,59 +78,70 @@ class Store(context: Context) {
         get() = prefs.getLong(K_LOCKED, 0L)
         set(v) = prefs.edit().putLong(K_LOCKED, v).apply()
 
-    fun addSession(token: String) {
-        val next = sessions().toMutableSet()
-        next.add(token)
+    // A session is token -> device id. The token is the credential and changes
+    // on every pairing; the device id is who the lists belong to and does not.
+    // Keying lists on the token would hand a re-paired phone an empty list.
+
+    fun addSession(token: String, deviceId: String) {
+        val next = sessions()
+        next.put(token, deviceId)
         // A handful of phones is realistic; the cap stops an attacker growing
         // this without bound.
-        prefs.edit().putStringSet(K_SESSIONS, next.take(20).toSet()).apply()
+        while (next.length() > 20) next.remove(next.keys().next())
+        prefs.edit().putString(K_SESSIONS, next.toString()).apply()
     }
 
-    fun hasSession(token: String): Boolean = sessions().contains(token)
+    fun deviceFor(token: String): String? =
+        if (token.isEmpty()) null else sessions().optStringOrNull(token)
 
     fun clearSessions() = prefs.edit().remove(K_SESSIONS).apply()
 
-    fun sessionCount(): Int = sessions().size
+    fun sessionCount(): Int = sessions().length()
 
-    private fun sessions(): Set<String> = prefs.getStringSet(K_SESSIONS, emptySet()) ?: emptySet()
+    private fun sessions(): JSONObject =
+        runCatching { JSONObject(prefs.getString(K_SESSIONS, null) ?: "{}") }.getOrDefault(JSONObject())
 
     var controlEnabled: Boolean
         get() = prefs.getBoolean(K_CONTROL, true)
         set(v) = prefs.edit().putBoolean(K_CONTROL, v).apply()
 
-    // ---- lists -------------------------------------------------------------
+    // ---- lists, one set per paired phone -----------------------------------
+    //
+    // Each phone's lists live under their own keys, so two phones saving at the
+    // same moment never read-modify-write the same value. deviceId is checked
+    // by isValidDeviceId before it gets anywhere near a key name.
 
-    val watchlist: List<Title> get() = readList(K_WATCHLIST)
-    val pinned: List<Title> get() = readList(K_PINNED)
-    val history: List<Title> get() = readList(K_HISTORY)
-
-    fun isInWatchlist(t: Title) = watchlist.any { it.key == t.key }
-    fun isPinned(t: Title) = pinned.any { it.key == t.key }
+    fun watchlist(deviceId: String): List<Title> = readList(key(deviceId, K_WATCHLIST))
+    fun pinned(deviceId: String): List<Title> = readList(key(deviceId, K_PINNED))
+    fun history(deviceId: String): List<Title> = readList(key(deviceId, K_HISTORY))
 
     /** @return true if the title is now in the list. */
-    fun toggleWatchlist(t: Title): Boolean = toggle(K_WATCHLIST, t)
+    fun toggleWatchlist(deviceId: String, t: Title): Boolean = toggle(key(deviceId, K_WATCHLIST), t)
 
-    fun togglePinned(t: Title): Boolean = toggle(K_PINNED, t, cap = 24)
+    fun togglePinned(deviceId: String, t: Title): Boolean = toggle(key(deviceId, K_PINNED), t, cap = 24)
 
-    fun recordOpen(t: Title, serviceId: String?) {
-        val list = history.filter { it.key != t.key }.toMutableList()
+    fun recordOpen(deviceId: String, t: Title, serviceId: String?) {
+        val list = history(deviceId).filter { it.key != t.key }.toMutableList()
         list.add(0, t)
-        writeList(K_HISTORY, list.take(120))
+        writeList(key(deviceId, K_HISTORY), list.take(120))
         serviceId?.let {
             val counts = prefs.getInt("opens_$it", 0)
             prefs.edit().putInt("opens_$it", counts + 1).apply()
         }
         // Opening something you pinned should float it back to the top.
-        val p = pinned.toMutableList()
+        val p = pinned(deviceId).toMutableList()
         val idx = p.indexOfFirst { it.key == t.key }
         if (idx > 0) {
             val entry = p.removeAt(idx)
             p.add(0, entry)
-            writeList(K_PINNED, p)
+            writeList(key(deviceId, K_PINNED), p)
         }
     }
 
-    fun clearHistory() = writeList(K_HISTORY, emptyList())
+    private fun key(deviceId: String, list: String): String {
+        require(isValidDeviceId(deviceId)) { "bad device id" }
+        return "dev.$deviceId.$list"
+    }
 
     // ---- plumbing ----------------------------------------------------------
 
@@ -161,27 +173,38 @@ class Store(context: Context) {
         prefs.edit().putString(key, arr.toString()).apply()
     }
 
-    /** What the phone needs to render its lists. Never includes the API keys. */
-    fun snapshotJson(): JSONObject = JSONObject().apply {
+    /**
+     * What this phone needs to render its own lists. Never includes the API
+     * keys, the pairing token or the device id.
+     */
+    fun snapshotJson(deviceId: String): JSONObject = JSONObject().apply {
         put("region", region)
         put("hasTmdbKey", tmdbKey.isNotBlank())
         put("hasOmdbKey", omdbKey.isNotBlank())
-        put("watchlist", JSONArray().also { a -> watchlist.forEach { a.put(it.toJson()) } })
-        put("pinned", JSONArray().also { a -> pinned.forEach { a.put(it.toJson()) } })
+        put("watchlist", JSONArray().also { a -> watchlist(deviceId).forEach { a.put(it.toJson()) } })
+        put("pinned", JSONArray().also { a -> pinned(deviceId).forEach { a.put(it.toJson()) } })
     }
 
-    private companion object {
-        const val K_TMDB = "tmdbKey"
-        const val K_OMDB = "omdbKey"
-        const val K_REGION = "region"
-        const val K_LANG = "language"
-        const val K_TOKEN = "controlToken"
-        const val K_CONTROL = "controlEnabled"
-        const val K_WATCHLIST = "watchlist"
-        const val K_PINNED = "pinned"
-        const val K_HISTORY = "history"
-        const val K_SESSIONS = "sessions"
-        const val K_FAILED = "failedPairs"
-        const val K_LOCKED = "lockedUntil"
+    companion object {
+        /**
+         * The phone generates its id; this is the only gate on it. It becomes
+         * part of a preferences key, so the shape is strict.
+         */
+        fun isValidDeviceId(id: String): Boolean = DEVICE_ID.matches(id)
+
+        private val DEVICE_ID = Regex("^[a-f0-9]{32}$")
+
+        private const val K_TMDB = "tmdbKey"
+        private const val K_OMDB = "omdbKey"
+        private const val K_REGION = "region"
+        private const val K_LANG = "language"
+        private const val K_TOKEN = "controlToken"
+        private const val K_CONTROL = "controlEnabled"
+        private const val K_WATCHLIST = "watchlist"
+        private const val K_PINNED = "pinned"
+        private const val K_HISTORY = "history"
+        private const val K_SESSIONS = "sessions"
+        private const val K_FAILED = "failedPairs"
+        private const val K_LOCKED = "lockedUntil"
     }
 }

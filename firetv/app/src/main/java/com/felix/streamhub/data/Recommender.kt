@@ -13,20 +13,21 @@ package com.felix.streamhub.data
  */
 class Recommender(private val tmdb: Tmdb, private val store: Store) {
 
-    suspend fun buildHome(): List<Row> {
+    /** Rows for one phone. Taste comes only from that phone's own lists. */
+    suspend fun buildHome(deviceId: String): List<Row> {
         val rows = mutableListOf<Row>()
         val seen = HashSet<String>()
 
         // The phone renders its own "Continue watching" strip from `pinned`, so
         // emitting one here too showed it twice. Still marked as seen so the
         // other rows do not repeat those titles.
-        store.pinned.forEach { seen += it.key }
+        store.pinned(deviceId).forEach { seen += it.key }
 
         val providerIds = runCatching { tmdb.providerIds() }.getOrDefault(emptyMap())
         val allProviders = providerIds.values.flatten()
 
         // --- because you opened X ------------------------------------------
-        store.history.firstOrNull()?.let { last ->
+        store.history(deviceId).firstOrNull()?.let { last ->
             runCatching {
                 val detail = tmdb.details(last.mediaType, last.id)
                 val recs = detail.recommendations.filterNot { seen.contains(it.key) }.take(18)
@@ -37,7 +38,7 @@ class Recommender(private val tmdb: Tmdb, private val store: Store) {
         }
 
         // --- picks for you ---------------------------------------------------
-        val topGenres = tasteGenres()
+        val topGenres = tasteGenres(deviceId)
         if (topGenres.isNotEmpty() && allProviders.isNotEmpty()) {
             runCatching {
                 val movies = tmdb.discover("movie", allProviders, topGenres)
@@ -95,14 +96,14 @@ class Recommender(private val tmdb: Tmdb, private val store: Store) {
     }
 
     /** Genre ids weighted by how recently and how often they show up in your activity. */
-    private fun tasteGenres(): List<Int> {
+    private fun tasteGenres(deviceId: String): List<Int> {
         val weights = HashMap<Int, Double>()
         fun add(t: Title, w: Double) {
             t.genreIds.forEach { weights[it] = (weights[it] ?: 0.0) + w }
         }
-        store.history.forEachIndexed { i, t -> add(t, maxOf(1.0, 12.0 - i * 0.4)) }
-        store.watchlist.forEach { add(it, 6.0) }
-        store.pinned.forEach { add(it, 8.0) }
+        store.history(deviceId).forEachIndexed { i, t -> add(t, maxOf(1.0, 12.0 - i * 0.4)) }
+        store.watchlist(deviceId).forEach { add(it, 6.0) }
+        store.pinned(deviceId).forEach { add(it, 8.0) }
 
         return weights.entries.sortedByDescending { it.value }.take(4).map { it.key }
     }

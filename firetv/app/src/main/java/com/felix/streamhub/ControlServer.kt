@@ -23,8 +23,10 @@ import java.io.ByteArrayOutputStream
  */
 class ControlServer(
     private val context: Context,
-    private val store: Store
-) : NanoHTTPD(ControlService.PORT) {
+    private val store: Store,
+    port: Int = ControlService.PORT,
+    host: String? = null
+) : NanoHTTPD(host, port) {
 
     private val main = Handler(Looper.getMainLooper())
     private val tmdb = Tmdb(store)
@@ -79,21 +81,21 @@ class ControlServer(
         // Everything below needs a paired phone. Header only - accepting the
         // token from the body would make these reachable from any web page.
         val presented = session.headers["x-streamhub-token"] ?: ""
-        if (!tokenValid(presented)) {
-            return json(Response.Status.UNAUTHORIZED, JSONObject().put("error", "Not paired."))
-        }
+        // Which phone is asking. Every list read or written below belongs to it.
+        val deviceId = store.deviceFor(presented)
+            ?: return json(Response.Status.UNAUTHORIZED, JSONObject().put("error", "Not paired."))
 
         val params = session.parameters
         fun q(name: String): String? = params[name]?.firstOrNull()
 
         return when {
-            uri == "/api/state" -> json(Response.Status.OK, stateJson())
-            uri == "/api/home" -> doHome()
+            uri == "/api/state" -> json(Response.Status.OK, stateJson(deviceId))
+            uri == "/api/home" -> doHome(deviceId)
             uri == "/api/search" -> doSearch(q("q"))
             uri == "/api/details" -> doDetails(q("mediaType"), q("id"))
-            uri == "/api/watchlist" -> doToggle(session, pinned = false)
-            uri == "/api/pinned" -> doToggle(session, pinned = true)
-            uri == "/api/play" -> doPlay(session)
+            uri == "/api/watchlist" -> doToggle(session, deviceId, pinned = false)
+            uri == "/api/pinned" -> doToggle(session, deviceId, pinned = true)
+            uri == "/api/play" -> doPlay(session, deviceId)
             uri == "/api/settings" -> doSettings(session)
             else -> json(Response.Status.NOT_FOUND, JSONObject().put("error", "Not found"))
         }
@@ -119,6 +121,13 @@ class ControlServer(
             return json(Response.Status.UNAUTHORIZED, JSONObject().put("error", "Too many wrong codes. Wait ${secs}s, or press New pairing code on the TV."))
         }
 
+        // Checked before the code, so a malformed request cannot burn attempts.
+        // The phone keeps this id across re-pairings; it is never sent back.
+        val deviceId = body.optString("deviceId", "")
+        if (!Store.isValidDeviceId(deviceId)) {
+            return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Reload the page and try again."))
+        }
+
         val given = body.optString("code", "").trim().uppercase()
         val expected = store.ensureControlToken()
 
@@ -135,11 +144,9 @@ class ControlServer(
         store.failedPairs = 0
         store.lockedUntil = 0L
         val token = java.math.BigInteger(1, java.security.SecureRandom().generateSeed(32)).toString(16)
-        store.addSession(token)
+        store.addSession(token, deviceId)
         return json(Response.Status.OK, JSONObject().put("token", token))
     }
-
-    private fun tokenValid(t: String): Boolean = t.isNotEmpty() && store.hasSession(t)
 
     /** Rotating the code on the TV throws every paired phone off. */
     @Synchronized
@@ -151,7 +158,7 @@ class ControlServer(
 
     // ---- data --------------------------------------------------------------
 
-    private fun stateJson(): JSONObject {
+    private fun stateJson(deviceId: String): JSONObject {
         val services = JSONArray()
         for (s in Services.ALL) {
             services.put(
@@ -169,7 +176,7 @@ class ControlServer(
 
         return JSONObject()
             .put("services", services)
-            .put("state", store.snapshotJson())
+            .put("state", store.snapshotJson(deviceId))
             .put(
                 "tv",
                 JSONObject()
@@ -181,9 +188,9 @@ class ControlServer(
             )
     }
 
-    private fun doHome(): Response {
+    private fun doHome(deviceId: String): Response {
         if (!tmdb.hasKey()) return json(Response.Status.OK, JSONObject().put("rows", JSONArray()).put("needsKey", true))
-        val rows = runCatching { runBlocking { recommender.buildHome() } }.getOrDefault(emptyList())
+        val rows = runCatching { runBlocking { recommender.buildHome(deviceId) } }.getOrDefault(emptyList())
         val arr = JSONArray()
         for (r in rows) {
             arr.put(
@@ -249,7 +256,7 @@ class ControlServer(
         return json(Response.Status.OK, out)
     }
 
-    private fun doToggle(session: IHTTPSession, pinned: Boolean): Response {
+    private fun doToggle(session: IHTTPSession, deviceId: String, pinned: Boolean): Response {
         val item = readBody(session).optJSONObject("item")
             ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "No item."))
         // fromJson never throws - it happily builds an empty Title - so the
@@ -258,12 +265,12 @@ class ControlServer(
         if (t.id <= 0 || (t.mediaType != "movie" && t.mediaType != "tv") || t.title.isBlank()) {
             return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Bad item."))
         }
-        if (pinned) store.togglePinned(t) else store.toggleWatchlist(t)
-        return json(Response.Status.OK, store.snapshotJson())
+        if (pinned) store.togglePinned(deviceId, t) else store.toggleWatchlist(deviceId, t)
+        return json(Response.Status.OK, store.snapshotJson(deviceId))
     }
 
     /** The whole point: open the real app on this TV, at the chosen title. */
-    private fun doPlay(session: IHTTPSession): Response {
+    private fun doPlay(session: IHTTPSession, deviceId: String): Response {
         val body = readBody(session)
         val serviceId = body.optString("serviceId")
         val item = body.optJSONObject("item")
@@ -305,11 +312,11 @@ class ControlServer(
         }
         latch.await(6, java.util.concurrent.TimeUnit.SECONDS)
 
-        item?.let { runCatching { store.recordOpen(Title.fromJson(it), serviceId) } }
+        item?.let { runCatching { store.recordOpen(deviceId, Title.fromJson(it), serviceId) } }
 
         return when (val r = result) {
             is AppLauncher.Result.Launched ->
-                json(Response.Status.OK, JSONObject().put("ok", true).put("kind", r.kind).put("service", svc.name).put("state", store.snapshotJson()))
+                json(Response.Status.OK, JSONObject().put("ok", true).put("kind", r.kind).put("service", svc.name).put("state", store.snapshotJson(deviceId)))
             is AppLauncher.Result.Failed ->
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", r.reason))
             null ->

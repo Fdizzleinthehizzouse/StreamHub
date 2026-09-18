@@ -77,10 +77,11 @@ Individually:
 
 `test/electron-boot.js` needs a display; on headless Linux prefix with `xvfb-run -a`.
 
-The Android side: `cd firetv && ./gradlew assembleDebug`. **This has never been
-run.** Everything Kotlin was type-checked against hand-written Java stubs of the
-Android SDK (that harness lived in the cloud sandbox and is not in this repo —
-with a real SDK installed it is obsolete, just build properly).
+The Android side: `cd firetv && ./gradlew assembleDebug`. It builds against a
+real SDK. `JAVA_HOME` must point at a JDK 17–21: Gradle 8.7 cannot run on the
+Java 25 that recent Android Studio bundles. JVM tests live in
+`firetv/app/src/test/` and start the real `ControlServer`; `test/regressions.js`
+runs them.
 
 ## Conventions
 
