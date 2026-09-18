@@ -3,7 +3,7 @@ package com.felix.streamhub
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.SearchManager
+import android.app.SearchManager
 import com.felix.streamhub.data.Service
 import com.felix.streamhub.data.Services
 
