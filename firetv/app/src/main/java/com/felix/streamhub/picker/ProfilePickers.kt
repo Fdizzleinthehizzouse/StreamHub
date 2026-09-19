@@ -76,6 +76,8 @@ object ProfilePickers {
         val resultTile: ((root: Node, title: String) -> Node?)? = null,
         /** On a title's page: the button that starts playback, or null. */
         val playButton: ((root: Node) -> Node?)? = null,
+        /** On a title's page: its name, to confirm it's the right one before Play. */
+        val pageTitle: ((root: Node) -> String?)? = null,
         val recognise: (root: Node, name: String) -> Outcome
     )
 
@@ -99,11 +101,24 @@ object ProfilePickers {
     // Search: the link opens a page whose EditText has the view id
     // searchEditText ("Search by title, genre, team or league"). Exactly one
     // such box must be on screen.
+    //
+    // Autoplay: each result is a focusable shelfItemRootLayout holding a
+    // `title` TextView with exactly the title's name. A title's page names it
+    // in detailLogoImage's description, and its first button,
+    // detailPageMainButtonOne, is PLAY (focused when the page opens).
 
     private fun disneyPlus() = Picker(
         serviceId = "disneyplus",
         packages = setOf("com.disney.disneyplus", "com.disney.disneyplus.androidtv"),
-        searchBox = { root -> root.all { it.viewId.endsWith(":id/searchEditText") }.singleOrNull() }
+        searchBox = { root -> root.all { it.viewId.endsWith(":id/searchEditText") }.singleOrNull() },
+        resultTile = { root, title ->
+            root.all { tile ->
+                tile.viewId.endsWith(":id/shelfItemRootLayout") &&
+                    tile.any { it.viewId.endsWith(":id/title") && fold(it.text) == fold(title) }
+            }.singleOrNull()
+        },
+        playButton = { root -> root.all { it.viewId.endsWith(":id/detailPageMainButtonOne") }.singleOrNull() },
+        pageTitle = { root -> root.all { it.viewId.endsWith(":id/detailLogoImage") }.singleOrNull()?.desc }
     ) { root, name ->
         val onPicker = root.any { it.viewId.endsWith(":id/profilesContent") } &&
             root.any { it.text == "Who's watching?" }
@@ -137,7 +152,8 @@ object ProfilePickers {
             root.all { it.viewId.endsWith(":id/standard_container_card_tile") && describesTitle(it.desc, title) }
                 .singleOrNull()
         },
-        playButton = { root -> root.all { it.viewId.endsWith(":id/watch_now_button") }.singleOrNull() }
+        playButton = { root -> root.all { it.viewId.endsWith(":id/watch_now_button") }.singleOrNull() },
+        pageTitle = { root -> root.all { it.viewId.endsWith(":id/header_title_logo") }.singleOrNull()?.desc }
     ) { root, name ->
         if (!root.any { it.viewId.endsWith(":id/whos_watching_heading") }) return@Picker Outcome.NotPicker
 

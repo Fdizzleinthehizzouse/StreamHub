@@ -112,6 +112,35 @@ class ProfilePickersTest {
     }
 
     @Test
+    fun primeNamesTheTitleOnItsPage() {
+        assertEquals("The Boys", prime.pageTitle!!(dump("prime-title.xml")))
+    }
+
+    // ---- Disney+ autoplay (real screens) --------------------------------------
+
+    @Test
+    fun disneyFindsExactlyTheSentTitleInItsResults() {
+        val tile = disney.resultTile!!(dump("disney-results.xml"), "Moana")!!
+        assertTrue(tile.viewId.endsWith(":id/shelfItemRootLayout"))
+        assertTrue(tile.desc.startsWith("Moana, Rated"))
+    }
+
+    @Test
+    fun disneyNeverOpensTheSequelForTheOriginal() {
+        // "Moana 2" is the next tile over.
+        val tile = disney.resultTile!!(dump("disney-results.xml"), "Moana 2")!!
+        assertTrue(tile.desc.startsWith("Moana 2,"))
+        assertEquals(null, disney.resultTile!!(dump("disney-results.xml"), "Moan"))
+    }
+
+    @Test
+    fun disneyFindsPlayAndTheTitleOnItsPage() {
+        assertTrue(disney.playButton!!(dump("disney-title.xml"))!!.viewId.endsWith(":id/detailPageMainButtonOne"))
+        assertEquals("Moana", disney.pageTitle!!(dump("disney-title.xml")))
+        assertEquals(null, disney.playButton!!(dump("disney-results.xml")))
+    }
+
+    @Test
     fun titlesWithCommasStillMatch() {
         assertTrue(ProfilePickers.describesTitle("Love, Death & Robots, NEW SEASON", "Love, Death & Robots"))
         assertTrue(ProfilePickers.describesTitle("Love, Death & Robots", "love, death & robots"))

@@ -190,6 +190,15 @@ class ProfilePickerService : AccessibilityService() {
 
         job.waitingFor = "the title’s page didn’t show a Play button"
         val play = playButton(tree) as Live? ?: return true
+        // Only press Play on the right title's page.
+        job.picker.pageTitle?.let { nameOf ->
+            val shown = nameOf(tree) ?: return true // page still loading
+            if (!ProfilePickers.describesTitle(shown, title)) {
+                armed = null
+                job.stop("opened “${shown}”, not “${title}”, so didn’t press Play")
+                return false
+            }
+        }
         if (!select(play)) { armed = null; job.stop("couldn’t highlight Play"); return false }
         job.playPressedAt = now
         job.report(State.WORKING, "Starting “${title}”")
