@@ -280,41 +280,23 @@ class ControlServer(
         val titleText = item?.optString("title")?.ifBlank { null } ?: body.optString("title").ifBlank { null }
         val contentId = body.optString("contentId").ifBlank { null }
 
+        // There used to be a "find this anywhere" route with no service. It
+        // relied on Fire TV's universal search, which apps cannot open; on a
+        // real TV it landed in the Silk browser instead.
+        val svc = Services.byId(serviceId)
+            ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Pick one of the services."))
+
         AppLauncher.wakeScreen(context)
 
-        // No service named means "find this anywhere" - the phone's Search on TV
-        // button, used exactly when none of the four carry it.
-        if (serviceId.isBlank()) {
-            if (titleText.isNullOrBlank()) {
-                return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Nothing to search for."))
-            }
-            var found = false
-            val searchLatch = java.util.concurrent.CountDownLatch(1)
-            main.post {
-                found = AppLauncher.universalSearch(context, titleText)
-                searchLatch.countDown()
-            }
-            searchLatch.await(6, java.util.concurrent.TimeUnit.SECONDS)
-            return json(
-                Response.Status.OK,
-                JSONObject().put("ok", found).put("kind", "universal-search")
-                    .apply { if (!found) put("error", "Could not open the TV's search.") }
-            )
-        }
-
-        val svc = Services.byId(serviceId)
-            ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown service"))
-
-        // Armed before launching, so the picker cannot appear before we look.
-        store.profileNames(deviceId)[serviceId]?.let { ProfilePickerService.arm(serviceId, it) }
+        // Armed before launching, so neither screen can appear before we look.
+        // The title is only typed where the search link leaves the box empty.
+        val typed = titleText?.takeIf { svc.search?.typeQuery == true }
+        ProfilePickerService.arm(serviceId, store.profileNames(deviceId)[serviceId], typed)
 
         // Starting another app has to happen on the main thread.
         var result: AppLauncher.Result? = null
         val latch = java.util.concurrent.CountDownLatch(1)
         main.post {
-            // Without a service-specific content id (which nobody publishes),
-            // Fire TV's own search is the ONLY thing that lands on the title.
-            // Passing false here skipped it and opened the app's home screen.
             result = AppLauncher.launch(context, serviceId, titleText, contentId)
             latch.countDown()
         }
@@ -323,8 +305,11 @@ class ControlServer(
         item?.let { runCatching { store.recordOpen(deviceId, Title.fromJson(it), serviceId) } }
 
         return when (val r = result) {
-            is AppLauncher.Result.Launched ->
-                json(Response.Status.OK, JSONObject().put("ok", true).put("kind", r.kind).put("service", svc.name).put("state", store.snapshotJson(deviceId)))
+            is AppLauncher.Result.Launched -> {
+                // Only claim the title will be typed if something can type it.
+                val kind = if (r.kind == "search-page" && typed != null && ProfilePickerService.isRunning) "search-typing" else r.kind
+                json(Response.Status.OK, JSONObject().put("ok", true).put("kind", kind).put("service", svc.name).put("state", store.snapshotJson(deviceId)))
+            }
             is AppLauncher.Result.Failed ->
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", r.reason))
             null ->

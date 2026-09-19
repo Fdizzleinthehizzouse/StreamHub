@@ -71,6 +71,24 @@ class ProfilePickersTest {
         assertEquals(Outcome.NotPicker, prime.recognise(dump("disney-picker.xml"), "Bob"))
     }
 
+    // ---- Disney+ search box -------------------------------------------------
+
+    @Test
+    fun disneyFindsItsSearchBoxOnTheRealSearchPage() {
+        val box = disney.searchBox!!(dump("disney-search.xml"))!!
+        assertTrue(box.viewId.endsWith(":id/searchEditText"))
+    }
+
+    @Test
+    fun disneyFindsNoSearchBoxOnThePicker() {
+        assertEquals(null, disney.searchBox!!(dump("disney-picker.xml")))
+    }
+
+    @Test
+    fun primeNeedsNoTyping() {
+        assertEquals(null, prime.searchBox)
+    }
+
     // ---- waiting for a half-drawn picker ------------------------------------
 
     @Test

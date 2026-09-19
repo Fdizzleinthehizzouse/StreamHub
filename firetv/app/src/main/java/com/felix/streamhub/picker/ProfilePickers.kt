@@ -70,6 +70,8 @@ object ProfilePickers {
     class Picker(
         val serviceId: String,
         val packages: Set<String>,
+        /** The search page's text box, for services whose search link leaves it empty. */
+        val searchBox: ((root: Node) -> Node?)? = null,
         val recognise: (root: Node, name: String) -> Outcome
     )
 
@@ -89,9 +91,15 @@ object ProfilePickers {
     // in s ("Access Peters's profile"). English UI only: the heading and
     // description are localised text.
 
+    //
+    // Search: the link opens a page whose EditText has the view id
+    // searchEditText ("Search by title, genre, team or league"). Exactly one
+    // such box must be on screen.
+
     private fun disneyPlus() = Picker(
         serviceId = "disneyplus",
-        packages = setOf("com.disney.disneyplus", "com.disney.disneyplus.androidtv")
+        packages = setOf("com.disney.disneyplus", "com.disney.disneyplus.androidtv"),
+        searchBox = { root -> root.all { it.viewId.endsWith(":id/searchEditText") }.singleOrNull() }
     ) { root, name ->
         val onPicker = root.any { it.viewId.endsWith(":id/profilesContent") } &&
             root.any { it.text == "Who's watching?" }

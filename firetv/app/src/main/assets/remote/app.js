@@ -647,26 +647,10 @@ async function openSheet(mediaType, id) {
         : el(
             'div',
             { class: 'empty', style: { padding: '18px 0', textAlign: 'left' } },
-            'Not on your four services right now. You can still hand the title to the TV’s own search:'
+            // No "search the TV" fallback: Fire TV's own search can't be
+            // opened by an app, and trying it landed in the web browser.
+            'Not on your four services right now.'
           ),
-
-      el(
-        'div',
-        { class: 'btn-row' },
-        el('button', {
-          class: 'btn',
-          text: '🔍 Search on TV',
-          onClick: async () => {
-            try {
-              const r = await api('/api/play', { method: 'POST', body: { serviceId: '', title: d.title } });
-              if (r.ok === false) toast(r.error || 'Could not open the TV search.', true);
-              else toast(`Searching the TV for “${d.title}”`);
-            } catch (err) {
-              toast(err.message, true);
-            }
-          },
-        })
-      ),
 
       el(
         'div',
@@ -761,11 +745,28 @@ async function playOnTv(serviceId, item) {
     }
     if (res.state) S.state = res.state;
     S.homeCache = null;
-    toast(item ? `Sent “${item.title}” to the TV` : `Opening ${svc.name} on the TV`);
+    toast(playMessage(res.kind, svc.name, item && item.title));
     closeSheet();
     updateBadge();
   } catch (err) {
     toast(err.message, true);
+  }
+}
+
+/** Say what the TV actually did - never more than it did. */
+function playMessage(kind, service, title) {
+  if (!title) return `Opening ${service} on the TV`;
+  switch (kind) {
+    case 'deeplink':
+      return `Opening “${title}” on ${service}`;
+    case 'search':
+      return `${service} is showing results for “${title}”`;
+    case 'search-typing':
+      return `Searching ${service} for “${title}”`;
+    case 'search-page':
+      return `${service} search is open. Type “${title}” with the remote`;
+    default:
+      return `${service} is open. Find “${title}” there`;
   }
 }
 

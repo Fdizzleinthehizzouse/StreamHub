@@ -3,6 +3,7 @@ package com.felix.streamhub.picker
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.graphics.Rect
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -66,7 +67,7 @@ class ProfilePickerService : AccessibilityService() {
         val job = armed ?: return false
         if (System.currentTimeMillis() > job.until) {
             armed = null
-            Log.i(TAG, "${job.serviceId}: no picker within ${ARM_MS / 1000}s; nothing done")
+            Log.i(TAG, "${job.serviceId}: nothing to do within ${ARM_MS / 1000}s; nothing done")
             return false
         }
 
@@ -74,23 +75,44 @@ class ProfilePickerService : AccessibilityService() {
         if (root.packageName?.toString() !in job.picker.packages) return true
         val tree = Live(root, null)
 
-        when (val d = job.settle.next(job.picker.recognise(tree, job.profileName))) {
-            ProfilePickers.Settle.Decision.KeepLooking -> return true
-            ProfilePickers.Settle.Decision.GiveUp -> {
-                // Never guess: leave the person on the picker.
+        // The search box showing means we are already in a profile.
+        if (job.query != null) {
+            job.picker.searchBox?.invoke(tree)?.let { box ->
                 armed = null
-                Log.w(TAG, "${job.serviceId}: picker is up but \"${job.profileName}\" is not on it (or not uniquely). Screen:")
-                // One entry per line: logcat truncates a single entry at ~4 KB,
-                // which on a real TV cut the tree off before the profile tiles.
-                describe(tree).lineSequence().forEach { Log.w(TAG, it) }
-            }
-            is ProfilePickers.Settle.Decision.Click -> {
-                armed = null
-                val clicked = (d.node as Live).info.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                Log.i(TAG, "${job.serviceId}: clicked \"${job.profileName}\" -> $clicked")
+                val args = Bundle().apply {
+                    putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, job.query)
+                }
+                val typed = (box as Live).info.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
+                Log.i(TAG, "${job.serviceId}: typed the title into search -> $typed")
+                return false
             }
         }
-        return false
+
+        val name = job.profileName
+        if (name != null && !job.profileDone) {
+            when (val d = job.settle.next(job.picker.recognise(tree, name))) {
+                ProfilePickers.Settle.Decision.KeepLooking -> return true
+                ProfilePickers.Settle.Decision.GiveUp -> {
+                    // Never guess: leave the person on the picker, and do not
+                    // type into anything behind it.
+                    armed = null
+                    Log.w(TAG, "${job.serviceId}: picker is up but \"$name\" is not on it (or not uniquely). Screen:")
+                    // One entry per line: logcat truncates a single entry at ~4 KB,
+                    // which on a real TV cut the tree off before the profile tiles.
+                    describe(tree).lineSequence().forEach { Log.w(TAG, it) }
+                    return false
+                }
+                is ProfilePickers.Settle.Decision.Click -> {
+                    val clicked = (d.node as Live).info.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    Log.i(TAG, "${job.serviceId}: clicked \"$name\" -> $clicked")
+                    job.profileDone = true
+                }
+            }
+        }
+
+        // Still waiting for the search box, if there is one to fill.
+        if (job.query == null) armed = null
+        return job.query != null
     }
 
     /** A live screen node, adapted for ProfilePickers. Children are read lazily. */
@@ -108,17 +130,21 @@ class ProfilePickerService : AccessibilityService() {
         }
     }
 
-    private class Job(val picker: ProfilePickers.Picker, val serviceId: String, val profileName: String, val until: Long) {
+    private class Job(
+        val picker: ProfilePickers.Picker,
+        val serviceId: String,
+        val profileName: String?,
+        val query: String?,
+        val until: Long
+    ) {
         val settle = ProfilePickers.Settle()
+        var profileDone = false
     }
 
     companion object {
         private const val TAG = "StreamHubPicker"
 
-        /**
-         * Long enough to cover the universal-search route, where the app only
-         * opens once someone presses OK on the remote.
-         */
+        /** Generous: a cold start on a low-memory TV can take a while. */
         const val ARM_MS = 90_000L
         private const val POLL_MS = 500L
 
@@ -128,11 +154,18 @@ class ProfilePickerService : AccessibilityService() {
         /** Whether the service has been enabled on this TV (see README). */
         val isRunning: Boolean get() = running != null
 
-        /** @return false if this service has no recognizer or the name is blank. */
-        fun arm(serviceId: String, profileName: String): Boolean {
+        /**
+         * Watch for [serviceId]'s profile picker and/or search box. Every play
+         * request replaces the previous job, so a stale one never acts on the
+         * next app. @return false if there is nothing this service can do.
+         */
+        fun arm(serviceId: String, profileName: String?, query: String?): Boolean {
+            armed = null
             val picker = ProfilePickers.forService(serviceId) ?: return false
-            if (profileName.isBlank()) return false
-            armed = Job(picker, serviceId, profileName, System.currentTimeMillis() + ARM_MS)
+            val name = profileName?.takeIf { it.isNotBlank() }
+            val q = query?.takeIf { it.isNotBlank() && picker.searchBox != null }
+            if (name == null && q == null) return false
+            armed = Job(picker, serviceId, name, q, System.currentTimeMillis() + ARM_MS)
             running?.startPolling()
             return true
         }

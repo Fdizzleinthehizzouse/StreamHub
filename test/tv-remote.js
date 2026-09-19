@@ -113,11 +113,10 @@ const server = http.createServer(async (req, res) => {
     return send(200, { region: 'BE', hasTmdbKey: hasKey, hasOmdbKey: false });
   }
   if (p === '/api/play') {
-    if (body.serviceId === '') {
-      return send(200, body.title ? { ok: true, kind: 'universal-search' } : { ok: false, error: 'Nothing to search for.' });
-    }
+    if (!body.serviceId) return send(400, { error: 'Pick one of the services.' });
     if (body.serviceId === 'hbomax') return send(200, { ok: false, error: 'HBO Max is not installed on this TV.' });
-    return send(200, { ok: true, kind: 'universal-search', service: 'Netflix', state: { watchlist: [], pinned: [] } });
+    // Netflix has no working search link on a real TV: home screen only.
+    return send(200, { ok: true, kind: 'home', service: 'Netflix', state: { watchlist: [], pinned: [] } });
   }
   if (p === '/api/watchlist' || p === '/api/pinned') {
     // the real server includes `key`; the client matches on it
@@ -225,6 +224,8 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(600);
   const play = calls.find((c) => c.path === '/api/play');
   check('tapping play sends the film to the TV', play && play.body.serviceId === 'netflix' && play.body.item.title === 'Breaking Bad', JSON.stringify(play && play.body));
+  const sent = await page.locator('#toast').textContent();
+  check('and says only what the TV did (app opened, not the title)', /Netflix is open\. Find “Breaking Bad” there/.test(sent), sent);
   check('nothing is asked of a PC any more', !calls.some((c) => c.path.includes('/api/tv/')));
 
   // --- the defects the review turned up ---------------------------------
@@ -254,19 +255,9 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(600);
   check('the watchlist button confirms the save', (await wlBtn.textContent()).includes('✓'), await wlBtn.textContent());
 
-  // Search on TV, for a title none of the four carry
-  calls.length = 0;
-  await page.evaluate(() => {
-    document.querySelectorAll('#sheet .btn').forEach((b) => { if (b.textContent.includes('Search on TV')) b.click(); });
-  });
-  await page.waitForTimeout(500);
-  const searchCall = calls.find((c) => c.path === '/api/play');
-  if (searchCall) {
-    check('Search on TV sends the title with no service', searchCall.body.serviceId === '' && !!searchCall.body.title, JSON.stringify(searchCall.body));
-  } else {
-    checks.push(true);
-    console.log('  ok   Search on TV button absent when the title is available (correct)');
-  }
+  // Fire TV's own search can't be opened by an app; on a real TV the old
+  // "Search on TV" button landed in the web browser. It must not come back.
+  check('there is no "Search on TV" button', !(await page.locator('#sheet').textContent()).includes('Search on TV'));
 
   await page.reload();
   await page.waitForTimeout(900);
