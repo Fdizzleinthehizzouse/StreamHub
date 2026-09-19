@@ -834,12 +834,42 @@ async function playOnTv(serviceId, item) {
     }
     if (res.state) S.state = res.state;
     S.homeCache = null;
-    toast(playMessage(res.kind, svc.name, item && item.title));
+    if (res.autoplay && item) followAutoplay(svc.name, item.title);
+    else toast(playMessage(res.kind, svc.name, item && item.title));
     closeSheet();
     updateBadge();
   } catch (err) {
     toast(err.message, true);
   }
+}
+
+/**
+ * The TV is driving the service to playback. Show its progress; "playing" only
+ * when the TV has confirmed it (from Android's media session), never on hope.
+ */
+let autoplayRun = 0;
+async function followAutoplay(service, title) {
+  const run = ++autoplayRun; // a newer title supersedes this one
+  toast(`${service}: finding “${title}”…`);
+  let last = '';
+  const deadline = Date.now() + 110000;
+  while (run === autoplayRun && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 1500));
+    let s;
+    try {
+      s = await api('/api/autoplay');
+    } catch {
+      continue; // transient; keep following
+    }
+    if (s.state === 'playing') return toast(`▶ Playing “${title}” on ${service}`);
+    if (s.state === 'stopped') return toast(`${service}: ${s.message}`, true);
+    if (s.state === 'done' || s.state === 'none') return;
+    if (s.message && s.message !== last) {
+      last = s.message;
+      toast(`${service}: ${s.message}…`);
+    }
+  }
+  if (run === autoplayRun) toast(`${service}: no word from the TV. Check the screen.`, true);
 }
 
 /** Say what the TV actually did - never more than it did. */

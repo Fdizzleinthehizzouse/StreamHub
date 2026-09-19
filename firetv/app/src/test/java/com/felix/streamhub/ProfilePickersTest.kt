@@ -89,6 +89,37 @@ class ProfilePickersTest {
         assertEquals(null, prime.searchBox)
     }
 
+    // ---- Prime Video autoplay (real screens) ----------------------------------
+
+    @Test
+    fun primeFindsExactlyTheSentTitleInItsResults() {
+        val tile = prime.resultTile!!(dump("prime-results.xml"), "The Boys")!!
+        assertEquals("The Boys, MOST LIKED", tile.desc) // non-breaking space, as on the TV
+    }
+
+    @Test
+    fun primeNeverOpensAMerelySimilarTitle() {
+        // "The Boys Presents: Diabolical" and "Prime Rewind: Inside The Boys" are right there.
+        assertEquals(null, prime.resultTile!!(dump("prime-results.xml"), "The"))
+        assertEquals(null, prime.resultTile!!(dump("prime-results.xml"), "Boys"))
+        assertEquals(null, prime.resultTile!!(dump("prime-results.xml"), "The Boys Presents"))
+    }
+
+    @Test
+    fun primeFindsWatchNowOnlyOnATitlesPage() {
+        assertEquals(true, prime.playButton!!(dump("prime-title.xml"))!!.viewId.endsWith(":id/watch_now_button"))
+        assertEquals(null, prime.playButton!!(dump("prime-results.xml")))
+    }
+
+    @Test
+    fun titlesWithCommasStillMatch() {
+        assertTrue(ProfilePickers.describesTitle("Love, Death & Robots, NEW SEASON", "Love, Death & Robots"))
+        assertTrue(ProfilePickers.describesTitle("Love, Death & Robots", "love, death & robots"))
+        assertEquals(false, ProfilePickers.describesTitle("Love, Death & Robots", "Love"))
+        // Prime separates the badge with a non-breaking space.
+        assertTrue(ProfilePickers.describesTitle("The Boys, MOST LIKED", "The Boys"))
+    }
+
     // ---- waiting for a half-drawn picker ------------------------------------
 
     @Test

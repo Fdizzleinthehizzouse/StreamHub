@@ -104,6 +104,7 @@ class ControlServer(
             uri == "/api/play" -> doPlay(session, deviceId)
             uri == "/api/profiles" -> doProfiles(session, deviceId)
             uri == "/api/remote" -> doRemote(session)
+            uri == "/api/autoplay" -> doAutoplayStatus(deviceId)
             uri == "/api/settings" -> doSettings(session)
             else -> json(Response.Status.NOT_FOUND, JSONObject().put("error", "Not found"))
         }
@@ -352,10 +353,14 @@ class ControlServer(
 
         AppLauncher.wakeScreen(context)
 
-        // Armed before launching, so neither screen can appear before we look.
-        // The title is only typed where the search link leaves the box empty.
+        // Armed before launching, so no screen can appear before we look.
+        // The title is only typed where the search link leaves the box empty,
+        // and only driven to playback where the screens can be read and keys
+        // can be pressed.
         val typed = titleText?.takeIf { svc.search?.typeQuery == true }
-        ProfilePickerService.arm(serviceId, store.profileNames(deviceId)[serviceId], typed)
+        val autoplay = titleText?.takeIf { ProfilePickerService.canAutoplay(serviceId) && TvKeys.helperRunning() }
+        val relaunch = { main.post { AppLauncher.launch(context, serviceId, titleText, contentId) }; Unit }
+        val armed = ProfilePickerService.arm(serviceId, deviceId, store.profileNames(deviceId)[serviceId], typed, autoplay, relaunch)
 
         // Starting another app has to happen on the main thread.
         var result: AppLauncher.Result? = null
@@ -372,13 +377,29 @@ class ControlServer(
             is AppLauncher.Result.Launched -> {
                 // Only claim the title will be typed if something can type it.
                 val kind = if (r.kind == "search-page" && typed != null && ProfilePickerService.isRunning) "search-typing" else r.kind
-                json(Response.Status.OK, JSONObject().put("ok", true).put("kind", kind).put("service", svc.name).put("state", store.snapshotJson(deviceId)))
+                json(
+                    Response.Status.OK,
+                    JSONObject().put("ok", true).put("kind", kind).put("service", svc.name)
+                        // The phone follows /api/autoplay; it never claims "playing" itself.
+                        .put("autoplay", armed && autoplay != null)
+                        .put("state", store.snapshotJson(deviceId))
+                )
             }
             is AppLauncher.Result.Failed ->
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", r.reason))
             null ->
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", "Timed out starting ${svc.name}."))
         }
+    }
+
+    /** Progress of this phone's latest title, as the TV helper sees it. Another phone's is not shown. */
+    private fun doAutoplayStatus(deviceId: String): Response {
+        val s = ProfilePickerService.status?.takeIf { it.deviceId == deviceId }
+            ?: return json(Response.Status.OK, JSONObject().put("state", "none"))
+        return json(
+            Response.Status.OK,
+            JSONObject().put("state", s.state.name.lowercase()).put("message", s.message).put("service", s.serviceId)
+        )
     }
 
     /**

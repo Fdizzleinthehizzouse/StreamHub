@@ -64,17 +64,46 @@ object KeyServer {
                     s.soTimeout = 10_000
                     val reader = s.inputStream.bufferedReader()
                     val out = s.outputStream
-                    // One connection may carry several presses, one per line.
+                    // One connection may carry several requests, one per line.
                     while (true) {
-                        val line = reader.readLine() ?: break
-                        val code = KEYS[line.trim()]
-                        val ok = code != null && press(inject, code)
-                        out.write(if (ok) "ok\n".toByteArray() else "no\n".toByteArray())
+                        val line = reader.readLine()?.trim() ?: break
+                        val reply = if (line == PLAYING) {
+                            playingPackages().joinToString(" ")
+                        } else {
+                            val code = KEYS[line]
+                            if (code != null && press(inject, code)) "ok" else "no"
+                        }
+                        out.write("$reply\n".toByteArray())
                         out.flush()
                     }
                 }
             }
         }
+    }
+
+    /** The one read-only query: which apps' media sessions are playing. */
+    const val PLAYING = "PLAYING"
+
+    /**
+     * Apps whose media session is playing (state=3), from `dumpsys
+     * media_session`. The shell user can read it; apps can't without being a
+     * notification listener. It's how "it's playing" is confirmed even for
+     * Netflix and HBO Max, whose screens can't be read.
+     */
+    private fun playingPackages(): List<String> {
+        val p = ProcessBuilder("dumpsys", "media_session").redirectErrorStream(true).start()
+        return playingFrom(p.inputStream.bufferedReader().readLines())
+    }
+
+    /** Pure, for testing: `package=X` followed (within its block) by `state=PlaybackState {state=3,`. */
+    fun playingFrom(lines: List<String>): List<String> {
+        val out = LinkedHashSet<String>()
+        var pkg: String? = null
+        for (l in lines) {
+            Regex("\\bpackage=([\\w.]+)").find(l)?.let { pkg = it.groupValues[1] }
+            if (pkg != null && l.contains("state=PlaybackState {state=3,")) out += pkg!!
+        }
+        return out.toList()
     }
 
     /**

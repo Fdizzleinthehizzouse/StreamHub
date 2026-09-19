@@ -72,6 +72,10 @@ object ProfilePickers {
         val packages: Set<String>,
         /** The search page's text box, for services whose search link leaves it empty. */
         val searchBox: ((root: Node) -> Node?)? = null,
+        /** On search results: the one tile for exactly this title, or null. */
+        val resultTile: ((root: Node, title: String) -> Node?)? = null,
+        /** On a title's page: the button that starts playback, or null. */
+        val playButton: ((root: Node) -> Node?)? = null,
         val recognise: (root: Node, name: String) -> Outcome
     )
 
@@ -121,9 +125,19 @@ object ProfilePickers {
     // its tile holds a profile_add_icon, so it is excluded: someone whose
     // profile is literally called "New" must not create a profile instead.
 
+    //
+    // Autoplay: search results are standard_container_card_tile nodes whose
+    // description is "<title>, <badge>" ("The Boys, MOST LIKED") or just the
+    // title. A title's page has watch_now_button ("Episode 8 / Watch now").
+
     private fun primeVideo() = Picker(
         serviceId = "primevideo",
-        packages = setOf("com.amazon.firebat", "com.amazon.avod", "com.amazon.avod.thirdpartyclient")
+        packages = setOf("com.amazon.firebat", "com.amazon.avod", "com.amazon.avod.thirdpartyclient"),
+        resultTile = { root, title ->
+            root.all { it.viewId.endsWith(":id/standard_container_card_tile") && describesTitle(it.desc, title) }
+                .singleOrNull()
+        },
+        playButton = { root -> root.all { it.viewId.endsWith(":id/watch_now_button") }.singleOrNull() }
     ) { root, name ->
         if (!root.any { it.viewId.endsWith(":id/whos_watching_heading") }) return@Picker Outcome.NotPicker
 
@@ -137,8 +151,32 @@ object ProfilePickers {
 
     // ---- helpers ---------------------------------------------------------
 
-    /** Names are typed on a phone, so case and stray spaces are forgiven. */
-    private fun fold(s: String) = s.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
+    /**
+     * A tile describes a title if its text is the title, or the title then
+     * ", <BADGE>" - Prime's badges are capitals ("MOST LIKED", "SEASON
+     * FINALE"). Not "text before the first comma" (breaks "Love, Death &
+     * Robots"), and not "starts with title, " (then "Love" would open "Love,
+     * Death & Robots").
+     */
+    fun describesTitle(desc: String, title: String): Boolean {
+        val d = fold(desc)
+        val t = fold(title)
+        if (t.isEmpty()) return false
+        if (d == t) return true
+        if (!d.startsWith("$t, ")) return false
+        val rest = desc.replace(SPACES, " ").trim().drop(t.length + 2)
+        return rest.any { it.isLetter() } && rest == rest.uppercase(Locale.ROOT)
+    }
+
+    /**
+     * Names are typed on a phone, so case and stray spaces are forgiven.
+     * Unicode spaces are named explicitly: Prime's tiles read "The Boys,<NBSP>
+     * MOST LIKED", and `\s` matches NBSP on Android's regex engine but not the
+     * JVM's, so behaviour differed between the TV and the tests.
+     */
+    private fun fold(s: String) = s.replace(SPACES, " ").trim().lowercase(Locale.ROOT)
+
+    private val SPACES = Regex("[\\s\\u00A0\\u2007\\u202F\\u2009\\u200A\\u3000]+")
 
     private fun Node.all(pred: (Node) -> Boolean): List<Node> {
         val out = mutableListOf<Node>()

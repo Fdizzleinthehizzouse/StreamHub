@@ -41,6 +41,20 @@ class KeyServerTest {
     }
 
     @Test
+    fun playingIsReadFromTheMediaSessionDump() {
+        // As `dumpsys media_session` printed on the real TV while Prime played.
+        val dump = listOf(
+            "      package=com.amazon.firebat",
+            "      state=PlaybackState {state=3, position=0, buffered position=0, speed=1.0, updated=1117643266, actions=173318}",
+            "      package=com.netflix.ninja",
+            "      state=PlaybackState {state=1, position=0, buffered position=0, speed=1.0}",
+            "      package=com.spotify.tv.android"
+        )
+        assertEquals(listOf("com.amazon.firebat"), KeyServer.playingFrom(dump))
+        assertEquals(emptyList<String>(), KeyServer.playingFrom(dump.drop(2)))
+    }
+
+    @Test
     fun onlyFixedKeysExist() {
         assertEquals(setOf("UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "HOME", "PLAYPAUSE"), KeyServer.KEYS.keys)
         assertEquals(KeyServer.KEYS.keys, TvKeys.Key.values().map { it.name }.toSet())

@@ -55,6 +55,22 @@ object TvKeys {
         }
     }
 
+    /** Packages whose media session is playing, or null if the helper isn't running. */
+    @Synchronized
+    fun playing(): List<String>? {
+        val socket = Socket()
+        return try {
+            socket.connect(InetSocketAddress("127.0.0.1", KeyServer.PORT), 1_000)
+            socket.soTimeout = 5_000
+            socket.outputStream.apply { write("${KeyServer.PLAYING}\n".toByteArray()); flush() }
+            socket.inputStream.bufferedReader().readLine()?.split(' ')?.filter { it.isNotBlank() }
+        } catch (e: java.io.IOException) {
+            null
+        } finally {
+            runCatching { socket.close() }
+        }
+    }
+
     /** Whether the helper is up right now (cheap: a connect, no key sent). */
     fun helperRunning(): Boolean {
         val socket = Socket()

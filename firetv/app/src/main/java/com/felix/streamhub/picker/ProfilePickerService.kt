@@ -5,32 +5,43 @@ import android.accessibilityservice.AccessibilityServiceInfo
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
-import android.os.Looper
+import android.os.HandlerThread
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.felix.streamhub.TvKeys
 
 /**
- * Clicks your profile on a service's "who's watching" screen, and nothing else.
+ * The TV helper: after a play request, picks your profile, fills in Disney+
+ * search, and - where the screens can be read - opens the exact title and
+ * starts it. Otherwise it only does Back / Home for the phone.
  *
- * Armed only by a play request from a phone that has a profile name for that
- * service, for [ARM_MS]. Outside that window every event is ignored. The
- * service config also limits events to the Disney+ and Prime Video packages.
- * Nothing is stored or reported: this is not usage tracking.
+ * Armed only by a play request, for [ARM_MS]; outside that window it does
+ * nothing. The service config limits it to the Disney+ and Prime Video
+ * packages. Nothing is stored or reported beyond the current request's status.
+ *
+ * Rule for every press: find the exact item, move the highlight onto it,
+ * confirm the highlight is there, then press OK (a real key press via
+ * TvKeys - Prime Video ignores accessibility clicks). Anything unexpected:
+ * stop and say where.
  *
  * Fire TV has no settings screen to enable a sideloaded accessibility
  * service; see the README for the adb commands.
  */
 class ProfilePickerService : AccessibilityService() {
 
-    private val main = Handler(Looper.getMainLooper())
+    // Not the main thread: key presses and the "is it playing" check use a
+    // local socket, which Android forbids on the main thread.
+    private val worker = HandlerThread("tv-helper").apply { start() }
+    private val handler = Handler(worker.looper)
 
     // Looked at on a timer while armed, not only on events. On a real Fire TV,
     // Disney+ sends one window event at start-up - before its screen exists -
     // and none after, even once the picker is up. Waiting for events never saw it.
     private val poll = object : Runnable {
         override fun run() {
-            if (check()) main.postDelayed(this, POLL_MS)
+            val again = runCatching { check() }.onFailure { Log.w(TAG, "check failed", it) }.getOrDefault(false)
+            if (again) handler.postDelayed(this, POLL_MS)
         }
     }
 
@@ -47,7 +58,7 @@ class ProfilePickerService : AccessibilityService() {
 
     override fun onUnbind(intent: android.content.Intent?): Boolean {
         running = null
-        main.removeCallbacks(poll)
+        handler.removeCallbacks(poll)
         return super.onUnbind(intent)
     }
 
@@ -58,17 +69,36 @@ class ProfilePickerService : AccessibilityService() {
     }
 
     fun startPolling() {
-        main.removeCallbacks(poll)
-        main.post(poll)
+        handler.removeCallbacks(poll)
+        handler.post(poll)
     }
 
     /** @return true to keep looking. */
     private fun check(): Boolean {
         val job = armed ?: return false
-        if (System.currentTimeMillis() > job.until) {
+        val now = System.currentTimeMillis()
+        if (now > job.until) {
             armed = null
-            Log.i(TAG, "${job.serviceId}: nothing to do within ${ARM_MS / 1000}s; nothing done")
+            job.stop(job.waitingFor ?: "nothing to do")
+            Log.i(TAG, "${job.serviceId}: gave up after ${ARM_MS / 1000}s: ${job.waitingFor}")
             return false
+        }
+
+        // Playback confirmation needs no screen: the media session says it.
+        if (job.playPressedAt != 0L) {
+            val playing = TvKeys.playing()
+            if (playing != null && playing.any { it in job.picker.packages }) {
+                armed = null
+                job.report(State.PLAYING, "Playing")
+                Log.i(TAG, "${job.serviceId}: playing")
+                return false
+            }
+            if (now - job.playPressedAt > PLAY_CONFIRM_MS) {
+                armed = null
+                job.stop("pressed Play, but nothing started")
+                return false
+            }
+            return true
         }
 
         val root = rootInActiveWindow ?: return true
@@ -76,26 +106,38 @@ class ProfilePickerService : AccessibilityService() {
         val tree = Live(root, null)
 
         // The search box showing means we are already in a profile.
-        if (job.query != null) {
+        if (job.query != null && !job.typed) {
             job.picker.searchBox?.invoke(tree)?.let { box ->
-                armed = null
                 val args = Bundle().apply {
                     putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, job.query)
                 }
                 val typed = (box as Live).info.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
                 Log.i(TAG, "${job.serviceId}: typed the title into search -> $typed")
-                return false
+                job.typed = true
+                job.profileDone = true
+                if (job.autoplay == null) { armed = null; job.report(State.DONE, "Search filled in"); return false }
+                return true
             }
         }
 
         val name = job.profileName
+        if (name == null && job.autoplay != null && job.picker.recognise(tree, NO_NAME) != ProfilePickers.Outcome.NotPicker) {
+            // The picker is up and we don't know whose profile to choose.
+            armed = null
+            job.stop("${serviceName(job.serviceId)} is asking who’s watching. Add your profile name in Settings → Your profiles")
+            return false
+        }
         if (name != null && !job.profileDone) {
             when (val d = job.settle.next(job.picker.recognise(tree, name))) {
-                ProfilePickers.Settle.Decision.KeepLooking -> return true
+                ProfilePickers.Settle.Decision.KeepLooking -> {
+                    // Not the picker (yet). If it's the results, we're past it.
+                    if (job.autoplay == null || job.picker.resultTile?.invoke(tree, job.autoplay) == null) return true
+                    job.profileDone = true
+                }
                 ProfilePickers.Settle.Decision.GiveUp -> {
-                    // Never guess: leave the person on the picker, and do not
-                    // type into anything behind it.
+                    // Never guess: leave the person on the picker.
                     armed = null
+                    job.stop("your profile “${name}” isn’t on the “Who’s watching” screen")
                     Log.w(TAG, "${job.serviceId}: picker is up but \"$name\" is not on it (or not uniquely). Screen:")
                     // One entry per line: logcat truncates a single entry at ~4 KB,
                     // which on a real TV cut the tree off before the profile tiles.
@@ -103,17 +145,82 @@ class ProfilePickerService : AccessibilityService() {
                     return false
                 }
                 is ProfilePickers.Settle.Decision.Click -> {
-                    val clicked = (d.node as Live).info.performAction(AccessibilityNodeInfo.ACTION_CLICK)
-                    Log.i(TAG, "${job.serviceId}: clicked \"$name\" -> $clicked")
+                    val tile = d.node as Live
+                    // Key press if the key helper is up; else the accessibility click
+                    // that works on Disney+.
+                    val ok = select(tile) || tile.info.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                    Log.i(TAG, "${job.serviceId}: picked profile \"$name\" -> $ok")
                     job.profileDone = true
+                    job.profilePickedAt = now
+                    job.report(State.WORKING, "Picked your profile")
+                    return job.query != null || job.autoplay != null
                 }
             }
         }
 
-        // Still waiting for the search box, if there is one to fill.
-        if (job.query == null) armed = null
-        return job.query != null
+        val title = job.autoplay
+        if (title == null) {
+            if (job.query == null) { armed = null; job.report(State.DONE, "Profile picked"); return false }
+            job.waitingFor = "the search box didn’t appear"
+            return true
+        }
+        // Set whenever autoplay is armed (see canAutoplay).
+        val resultTile = job.picker.resultTile!!
+        val playButton = job.picker.playButton!!
+
+        // Some apps drop where they were headed once a profile is picked;
+        // send the title again, once, if the results haven't shown up.
+        if (job.profilePickedAt != 0L && !job.tileOpened && !job.relaunched &&
+            now - job.profilePickedAt > RELAUNCH_AFTER_MS && resultTile(tree, title) == null
+        ) {
+            job.relaunched = true
+            Log.i(TAG, "${job.serviceId}: results not shown after the profile pick; sending the title again")
+            job.relaunch?.invoke()
+            return true
+        }
+
+        if (!job.tileOpened) {
+            job.waitingFor = "“${title}” wasn’t in the search results"
+            val tile = resultTile(tree, title) as Live? ?: return true
+            if (!select(tile)) { armed = null; job.stop("couldn’t highlight “${title}” in the results"); return false }
+            job.tileOpened = true
+            job.report(State.WORKING, "Opening “${title}”")
+            return true
+        }
+
+        job.waitingFor = "the title’s page didn’t show a Play button"
+        val play = playButton(tree) as Live? ?: return true
+        if (!select(play)) { armed = null; job.stop("couldn’t highlight Play"); return false }
+        job.playPressedAt = now
+        job.report(State.WORKING, "Starting “${title}”")
+        return true
     }
+
+    /**
+     * Highlight [node], confirm the highlight is on it, then press OK.
+     * @return false, with nothing pressed, if the highlight didn't land.
+     */
+    private fun select(node: Live): Boolean {
+        val info = node.info
+        if (!info.isFocused) info.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        // Identity, not position: on a real TV, Prime's results were still
+        // sliding into place, so the same tile's bounds changed between the
+        // focus and the check. Re-read this very node, and let it settle.
+        repeat(SETTLE_TRIES) {
+            Thread.sleep(SETTLE_MS)
+            val focused = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
+            if (info.refresh() && info.isFocused && focused != null && sameItem(focused, info)) {
+                return TvKeys.press(TvKeys.Key.OK) == TvKeys.Result.Pressed
+            }
+        }
+        Log.w(TAG, "highlight did not land on ${info.viewIdResourceName} \"${info.contentDescription}\"")
+        return false
+    }
+
+    private fun sameItem(a: AccessibilityNodeInfo, b: AccessibilityNodeInfo): Boolean =
+        a.viewIdResourceName == b.viewIdResourceName &&
+            a.contentDescription?.toString() == b.contentDescription?.toString() &&
+            a.text?.toString() == b.text?.toString()
 
     /** A live screen node, adapted for ProfilePickers. Children are read lazily. */
     private class Live(val info: AccessibilityNodeInfo, override val parent: Live?) : ProfilePickers.Node {
@@ -130,15 +237,36 @@ class ProfilePickerService : AccessibilityService() {
         }
     }
 
+    enum class State { WORKING, PLAYING, DONE, STOPPED }
+
+    /** What the phone that sent the title is told. */
+    data class Status(val deviceId: String, val serviceId: String, val title: String?, val state: State, val message: String)
+
     private class Job(
         val picker: ProfilePickers.Picker,
         val serviceId: String,
+        val deviceId: String,
         val profileName: String?,
         val query: String?,
+        /** The title to open and start, or null to stop after profile/search. */
+        val autoplay: String?,
+        val relaunch: (() -> Unit)?,
         val until: Long
     ) {
         val settle = ProfilePickers.Settle()
         var profileDone = false
+        var profilePickedAt = 0L
+        var relaunched = false
+        var typed = false
+        var tileOpened = false
+        var playPressedAt = 0L
+        var waitingFor: String? = null
+
+        fun report(state: State, message: String) {
+            status = Status(deviceId, serviceId, autoplay ?: query, state, message)
+        }
+
+        fun stop(why: String) = report(State.STOPPED, "Stopped: $why")
     }
 
     companion object {
@@ -147,20 +275,27 @@ class ProfilePickerService : AccessibilityService() {
         /** Generous: a cold start on a low-memory TV can take a while. */
         const val ARM_MS = 90_000L
         private const val POLL_MS = 500L
+        private const val RELAUNCH_AFTER_MS = 6_000L
+        private const val PLAY_CONFIRM_MS = 20_000L
+        private const val SETTLE_TRIES = 8
+        private const val SETTLE_MS = 150L
+        /** Matches no profile: asks recognise only "is this the picker?". */
+        private const val NO_NAME = " "
+
+        private fun serviceName(id: String) = com.felix.streamhub.data.Services.byId(id)?.name ?: id
 
         @Volatile private var armed: Job? = null
         @Volatile private var running: ProfilePickerService? = null
+
+        /** The latest request's progress, for the phone that sent it. */
+        @Volatile var status: Status? = null
+            private set
 
         /** Whether the service has been enabled on this TV (see README). */
         val isRunning: Boolean get() = running != null
 
         /**
-         * The phone's Back / Home buttons - only ever on a tap there.
-         *
-         * No OK and no arrows. An app cannot send key presses, and on a real
-         * Fire TV an accessibility click on the highlighted item in Prime Video
-         * was reported as delivered but ignored (twice, on different items),
-         * so OK would have claimed success for nothing.
+         * Back / Home without the key helper (accessibility global actions).
          * @return null if the service is not enabled on this TV.
          */
         fun remote(key: String): Boolean? {
@@ -172,18 +307,34 @@ class ProfilePickerService : AccessibilityService() {
             }
         }
 
+        /** Whether [serviceId] can be driven all the way to playback. */
+        fun canAutoplay(serviceId: String): Boolean {
+            val p = ProfilePickers.forService(serviceId) ?: return false
+            return running != null && p.resultTile != null && p.playButton != null
+        }
+
         /**
-         * Watch for [serviceId]'s profile picker and/or search box. Every play
-         * request replaces the previous job, so a stale one never acts on the
-         * next app. @return false if there is nothing this service can do.
+         * Start watching [serviceId] for this request. Every play request
+         * replaces the previous job, so a stale one never acts on the next
+         * app. @return false if there is nothing this service can do.
          */
-        fun arm(serviceId: String, profileName: String?, query: String?): Boolean {
+        fun arm(
+            serviceId: String,
+            deviceId: String,
+            profileName: String?,
+            query: String?,
+            autoplay: String? = null,
+            relaunch: (() -> Unit)? = null
+        ): Boolean {
             armed = null
             val picker = ProfilePickers.forService(serviceId) ?: return false
             val name = profileName?.takeIf { it.isNotBlank() }
             val q = query?.takeIf { it.isNotBlank() && picker.searchBox != null }
-            if (name == null && q == null) return false
-            armed = Job(picker, serviceId, name, q, System.currentTimeMillis() + ARM_MS)
+            val a = autoplay?.takeIf { it.isNotBlank() && canAutoplay(serviceId) }
+            if (name == null && q == null && a == null) return false
+            val job = Job(picker, serviceId, deviceId, name, q, a, relaunch, System.currentTimeMillis() + ARM_MS)
+            job.report(State.WORKING, if (a != null) "Looking for “${a}”" else "Working")
+            armed = job
             running?.startPolling()
             return true
         }

@@ -38,6 +38,7 @@ const TITLES = [
 let hasKey = false;
 let token = null;
 let profiles = null; // null: this phone has never been asked
+let autoplayPolls = 0;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 const server = http.createServer(async (req, res) => {
@@ -131,8 +132,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST') { if (body.tmdbKey) hasKey = true; return send(200, { ok: true, region: body.region || 'BE', hasTmdbKey: hasKey, hasOmdbKey: !!body.omdbKey }); }
     return send(200, { region: 'BE', hasTmdbKey: hasKey, hasOmdbKey: false });
   }
+  if (p === '/api/autoplay') {
+    // Two looks while working, then the TV confirms playback.
+    autoplayPolls += 1;
+    if (autoplayPolls < 3) return send(200, { state: 'working', message: 'Opening “Dune”', service: 'primevideo' });
+    return send(200, { state: 'playing', message: 'Playing', service: 'primevideo' });
+  }
   if (p === '/api/play') {
     if (!body.serviceId) return send(400, { error: 'Pick one of the services.' });
+    if (body.serviceId === 'primevideo') return send(200, { ok: true, kind: 'search', autoplay: true, service: 'Prime Video', state: { watchlist: [], pinned: [] } });
     if (body.serviceId === 'hbomax') return send(200, { ok: false, error: 'HBO Max is not installed on this TV.' });
     // Netflix has no working search link on a real TV: home screen only.
     return send(200, { ok: true, kind: 'home', service: 'Netflix', state: { watchlist: [], pinned: [] } });
@@ -299,6 +307,16 @@ const server = http.createServer(async (req, res) => {
   await wlBtn.click();
   await page.waitForTimeout(600);
   check('the watchlist button confirms the save', (await wlBtn.textContent()).includes('✓'), await wlBtn.textContent());
+
+  // Autoplay: the phone follows the TV and claims "playing" only when told.
+  await page.evaluate(() => playOnTv('primevideo', { id: 136315, mediaType: 'movie', title: 'Dune' }));
+  await page.waitForTimeout(300);
+  const firstToast = await page.locator('#toast').textContent();
+  check('autoplay starts by saying it is looking, not playing', /finding “Dune”/.test(firstToast) && !/Playing/.test(firstToast), firstToast);
+  await page.waitForTimeout(5200);
+  const doneToast = await page.locator('#toast').textContent();
+  check('and says playing once the TV confirms it', /▶ Playing “Dune” on Prime Video/.test(doneToast), doneToast);
+  check('by asking the TV, not assuming', autoplayPolls >= 3, String(autoplayPolls));
 
   // Fire TV's own search can't be opened by an app; on a real TV the old
   // "Search on TV" button landed in the web browser. It must not come back.
