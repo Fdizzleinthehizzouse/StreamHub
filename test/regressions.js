@@ -327,6 +327,9 @@ process.exit(0);
   // Found on a real Fire TV: HBO Max and Prime Video are TV-launcher-only apps.
   await check('TV-only apps (HBO Max, Prime Video) are found and opened', () => jvmTest('AppLauncherTest'));
 
+  // The desktop app's genre and rental fixes, which the TV app never had.
+  await check('TV app: genres are OR-joined and rentals stay out of the rows', () => jvmTest('TmdbTest'));
+
   // Against real picker dumps: never clicks "New", never guesses a name.
   await check('profile picking only clicks an exact, unique match on the real screens', () => jvmTest('ProfilePickersTest'));
 

@@ -86,6 +86,12 @@ class Tmdb(private val store: Store) {
             .map { Title.fromTmdb(it) }
     }
 
+    /** Which of the four services carry one title here. Search results say nothing about it. */
+    suspend fun availability(mediaType: String, id: Int): List<Availability> {
+        val res = Http.getJson(url("/$mediaType/$id/watch/providers"))
+        return availabilityFrom(res.optJSONObject("results")?.optJSONObject(region), providerIds())
+    }
+
     suspend fun details(mediaType: String, id: Int): TitleDetail {
         val append = if (mediaType == "tv")
             "credits,watch/providers,recommendations,external_ids"
@@ -97,20 +103,7 @@ class Tmdb(private val store: Store) {
         val regionProviders = d.optJSONObject("watch/providers")
             ?.optJSONObject("results")
             ?.optJSONObject(region)
-
-        val flatrate = regionProviders?.optJSONArray("flatrate").objects().map { it.optInt("provider_id") }.toSet()
-        val rentBuy = (regionProviders?.optJSONArray("rent").objects() +
-                regionProviders?.optJSONArray("buy").objects()).map { it.optInt("provider_id") }.toSet()
-
-        val ids = runCatching { providerIds() }.getOrDefault(emptyMap())
-        val availableOn = Services.ALL.mapNotNull { svc ->
-            val mine = ids[svc.id].orEmpty()
-            when {
-                mine.any { it in flatrate } -> Availability(svc.id, included = true)
-                mine.any { it in rentBuy } -> Availability(svc.id, included = false)
-                else -> null
-            }
-        }
+        val availableOn = availabilityFrom(regionProviders, runCatching { providerIds() }.getOrDefault(emptyMap()))
 
         val crew = d.optJSONObject("credits")?.optJSONArray("crew").objects()
         var directors = crew.filter { it.optString("job") == "Director" }.map { it.optString("name") }
@@ -152,15 +145,7 @@ class Tmdb(private val store: Store) {
         sortBy: String = "popularity.desc",
         extra: Map<String, String> = emptyMap()
     ): List<Title> {
-        val params = HashMap<String, String?>()
-        params["watch_region"] = region
-        params["include_adult"] = "false"
-        params["vote_count.gte"] = "25"
-        params["sort_by"] = sortBy
-        if (!providerIds.isNullOrEmpty()) params["with_watch_providers"] = providerIds.joinToString("|")
-        if (!genres.isNullOrEmpty()) params["with_genres"] = genres.joinToString(",")
-        params.putAll(extra)
-
+        val params = discoverParams(region, providerIds, genres, sortBy, extra)
         val res = Http.getJson(url("/discover/$mediaType", params))
         return res.optJSONArray("results").objects().map { Title.fromTmdb(it, mediaType) }
     }
@@ -175,5 +160,48 @@ class Tmdb(private val store: Store) {
     companion object {
         fun image(path: String?, size: String = "w342"): String? =
             if (path.isNullOrEmpty()) null else "https://image.tmdb.org/t/p/$size$path"
+
+        /**
+         * In TMDB discover a comma means AND and a pipe means OR. Genres joined
+         * with "," asked for titles in every one of your top genres at once, so
+         * "Picks for you" rarely showed. (Fixed long ago in the desktop app and
+         * never here.) Monetization is limited to subscription-style so rentals
+         * stay out of the rows.
+         */
+        fun discoverParams(
+            region: String,
+            providerIds: Collection<Int>?,
+            genres: Collection<Int>?,
+            sortBy: String,
+            extra: Map<String, String>
+        ): Map<String, String?> {
+            val params = HashMap<String, String?>()
+            params["watch_region"] = region
+            params["include_adult"] = "false"
+            params["vote_count.gte"] = "25"
+            params["sort_by"] = sortBy
+            if (!providerIds.isNullOrEmpty()) {
+                params["with_watch_providers"] = providerIds.joinToString("|")
+                params["with_watch_monetization_types"] = "flatrate|free|ads"
+            }
+            if (!genres.isNullOrEmpty()) params["with_genres"] = genres.joinToString("|")
+            params.putAll(extra)
+            return params
+        }
+
+        /** Subscription beats rent: a service that has it included is listed as included. */
+        fun availabilityFrom(regionProviders: JSONObject?, ids: Map<String, Set<Int>>): List<Availability> {
+            val flatrate = regionProviders?.optJSONArray("flatrate").objects().map { it.optInt("provider_id") }.toSet()
+            val rentBuy = (regionProviders?.optJSONArray("rent").objects() +
+                    regionProviders?.optJSONArray("buy").objects()).map { it.optInt("provider_id") }.toSet()
+            return Services.ALL.mapNotNull { svc ->
+                val mine = ids[svc.id].orEmpty()
+                when {
+                    mine.any { it in flatrate } -> Availability(svc.id, included = true)
+                    mine.any { it in rentBuy } -> Availability(svc.id, included = false)
+                    else -> null
+                }
+            }
+        }
     }
 }

@@ -7,6 +7,9 @@ import com.felix.streamhub.data.*
 import com.felix.streamhub.picker.ProfilePickerService
 import com.felix.streamhub.picker.ProfilePickers
 import fi.iki.elonen.NanoHTTPD
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
@@ -212,7 +215,33 @@ class ControlServer(
         if (!tmdb.hasKey()) return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Add your TMDB key in Settings first."))
         val items = runCatching { runBlocking { tmdb.search(query) } }
             .getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Search failed")) }
-        return json(Response.Status.OK, JSONObject().put("results", titlesJson(items)))
+
+        // Search results say nothing about where a title streams, so each is
+        // looked up (in parallel; cached for 30 minutes) and anything none of
+        // the four carry is dropped.
+        val checked = runBlocking {
+            runCatching { tmdb.providerIds() } // once, not once per parallel lookup
+            coroutineScope {
+                items.take(SEARCH_CHECK_LIMIT).map { t ->
+                    async { t to runCatching { tmdb.availability(t.mediaType, t.id) }.getOrNull() }
+                }.awaitAll()
+            }
+        }
+        if (checked.isNotEmpty() && checked.all { it.second == null }) {
+            return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "Couldn’t check where these stream. Try again."))
+        }
+        val results = JSONArray()
+        for ((t, avail) in checked) {
+            if (avail.isNullOrEmpty()) continue
+            results.put(t.toJson().put("availableOn", availabilityJson(avail)))
+        }
+        return json(Response.Status.OK, JSONObject().put("results", results))
+    }
+
+    private fun availabilityJson(list: List<Availability>): JSONArray {
+        val arr = JSONArray()
+        for (a in list) arr.put(JSONObject().put("serviceId", a.serviceId).put("kind", if (a.included) "included" else "rent"))
+        return arr
     }
 
     private fun doDetails(mediaType: String?, id: String?): Response {
@@ -226,10 +255,7 @@ class ControlServer(
             }
         }.getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Could not load that title.")) }
 
-        val avail = JSONArray()
-        for (a in d.availableOn) {
-            avail.put(JSONObject().put("serviceId", a.serviceId).put("kind", if (a.included) "included" else "rent"))
-        }
+        val avail = availabilityJson(d.availableOn)
 
         val cast = JSONArray()
         for (c in d.cast) {
@@ -431,6 +457,9 @@ class ControlServer(
     }
 
     private companion object {
+        /** One availability lookup per result; TMDB's first page is plenty. */
+        const val SEARCH_CHECK_LIMIT = 20
+
         val ASSETS = mapOf(
             "/index.html" to "text/html; charset=utf-8",
             "/app.js" to "text/javascript; charset=utf-8",

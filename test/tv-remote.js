@@ -97,7 +97,16 @@ const server = http.createServer(async (req, res) => {
     if (!hasKey) return send(200, { rows: [], needsKey: true });
     return send(200, { rows: [{ id: 'foryou', title: 'Picks for you', subtitle: 'From what you watch', items: TITLES }] });
   }
-  if (p === '/api/search') return send(200, { results: TITLES });
+  if (p === '/api/search') {
+    // The TV drops titles none of the four carry and tags the rest.
+    return send(200, {
+      results: [
+        { ...TITLES[0], availableOn: [{ serviceId: 'netflix', kind: 'included' }] },
+        { ...TITLES[1], availableOn: [{ serviceId: 'hbomax', kind: 'included' }, { serviceId: 'primevideo', kind: 'rent' }] },
+        { ...TITLES[2], availableOn: [{ serviceId: 'netflix', kind: 'included' }] },
+      ],
+    });
+  }
   if (p === '/api/details') {
     return send(200, {
       ...TITLES[0], runtime: 49, seasons: 5, genres: ['Drama', 'Crime'],
@@ -210,6 +219,8 @@ const server = http.createServer(async (req, res) => {
   await page.press('#q', 'Enter');
   await page.waitForTimeout(700);
   check('search works', (await page.locator('.grid .card').count()) === 3);
+  const tags = await page.locator('.grid .card').nth(1).locator('.badge').allTextContents();
+  check('each result says where it streams', tags.join(',') === 'HBO,PV €', JSON.stringify(tags));
 
   await page.locator('.grid .card').first().click();
   await page.waitForTimeout(700);

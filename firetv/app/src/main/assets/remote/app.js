@@ -446,7 +446,27 @@ function card(item) {
       item.score ? el('div', { class: `score ${scoreClass(item.score)}`, text: `${item.score}%` }) : null
     ),
     el('div', { class: 't', text: item.title }),
-    el('div', { class: 'y', text: [item.year, item.mediaType === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ') })
+    el('div', { class: 'y', text: [item.year, item.mediaType === 'tv' ? 'Series' : 'Film'].filter(Boolean).join(' · ') }),
+    badges(item.availableOn)
+  );
+}
+
+/** Where a title streams, as small service tags. Rent-only is marked. */
+function badges(availableOn) {
+  if (!availableOn || !availableOn.length) return null;
+  return el(
+    'div',
+    { class: 'badges' },
+    availableOn.map((a) => {
+      const svc = S.svcById[a.serviceId];
+      if (!svc) return null;
+      return el('span', {
+        class: 'badge' + (a.kind === 'rent' ? ' rent' : ''),
+        style: { background: svc.color },
+        title: a.kind === 'rent' ? `${svc.name} (rent or buy)` : svc.name,
+        text: a.kind === 'rent' ? `${svc.short} €` : svc.short,
+      });
+    })
   );
 }
 
@@ -543,7 +563,7 @@ async function doSearch(query) {
       el('p', { class: 'page-sub', text: `${data.results.length} result${data.results.length === 1 ? '' : 's'}` }),
       data.results.length
         ? el('div', { class: 'grid' }, data.results.map(card))
-        : el('div', { class: 'empty' }, el('strong', { text: 'No matches' }), 'Try a shorter query.')
+        : el('div', { class: 'empty' }, el('strong', { text: 'Not on your services' }), 'Nothing matching that is on Netflix, Disney+, HBO Max or Prime Video in your country.')
     );
   } catch (err) {
     host.replaceChildren(el('div', { class: 'empty' }, el('strong', { text: 'Search failed' }), err.message));
