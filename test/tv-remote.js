@@ -99,9 +99,9 @@ const server = http.createServer(async (req, res) => {
     return send(200, { genre: 'Sci-fi & fantasy', results: [{ ...TITLES[1], availableOn: [{ serviceId: 'hbomax', kind: 'included' }] }] });
   }
   if (p === '/api/remote') {
-    if (body.key === 'back') return send(200, { ok: true });
-    // As on a TV where the one-time setup hasn't been done.
-    return send(200, { ok: false, error: 'The TV needs its one-time setup for this (see the README).' });
+    // As after a TV restart, before the key helper is started again.
+    if (body.key === 'playpause') return send(200, { ok: false, error: 'The TV’s key helper isn’t running (it stops when the TV restarts).' });
+    return send(200, { ok: true });
   }
   if (p === '/api/home') {
     if (!hasKey) return send(200, { rows: [], needsKey: true });
@@ -231,15 +231,17 @@ const server = http.createServer(async (req, res) => {
   check('all four services are listed', (await page.locator('.svc-card').count()) === 4);
   check('a service missing from the TV says so', (await page.locator('.svc-card').nth(2).textContent()).includes('Not installed'));
 
+  const pad = await page.locator('.remote-key').evaluateAll((els) => els.map((e) => e.dataset.key).join(','));
+  check('the phone is a full remote: arrows, OK, Back, Home, play/pause', pad === 'up,left,ok,right,down,back,home,playpause', pad);
+  await page.screenshot({ path: path.join(__dirname, 'shots', '26-tv-remote.png') });
   calls.length = 0;
-  await page.locator('.remote-key[data-key="back"]').click();
+  await page.locator('.remote-key[data-key="ok"]').click();
   await page.waitForTimeout(300);
-  const back = calls.find((c) => c.path === '/api/remote');
-  check('the phone can press Back on the TV', back && back.body.key === 'back', JSON.stringify(back && back.body));
-  await page.locator('.remote-key[data-key="home"]').click();
+  const okPress = calls.find((c) => c.path === '/api/remote');
+  check('OK is sent to the TV', okPress && okPress.body.key === 'ok', JSON.stringify(okPress && okPress.body));
+  await page.locator('.remote-key[data-key="playpause"]').click();
   await page.waitForTimeout(400);
-  check('a press the TV could not do is reported, not faked', /one-time setup/.test(await page.locator('#toast').textContent()));
-  check('no OK or arrow buttons are offered', (await page.locator('.remote-key').count()) === 2);
+  check('a press the TV could not do is reported, not faked', /key helper/.test(await page.locator('#toast').textContent()));
 
   calls.length = 0;
   await page.locator('.svc-card').first().click();

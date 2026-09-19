@@ -108,7 +108,8 @@ This one switch turns on three things:
   kept skipping the picker during testing.
 - **Disney+ search filled in.** Disney+ opens its search page empty; the
   helper types the title in.
-- **Back and Home** buttons on the phone (Services tab).
+- **Back and Home** still work from the phone when the key helper (below)
+  isn't running.
 
 Netflix and HBO Max can't use any of this: their apps don't let anything else
 read their screen. It acts only right after you send a title or tap a button,
@@ -141,6 +142,23 @@ something was, put it back with the `put` command above, leaving StreamHub out.)
 screen — you're just back to choosing with the remote. To see what went wrong,
 run `adb logcat -s StreamHubPicker` and send a title. The recognition lives in
 one file, `picker/ProfilePickers.kt`.
+
+---
+
+## Step 5 — remote keys (arrows, OK, Back, Home, play/pause)
+
+The phone's **Services** tab has a full remote. Apps aren't allowed to press
+keys on a Fire TV, and this TV also refuses ADB from apps on the TV itself, so
+a small helper does the pressing. It is started from the computer with ADB,
+and only StreamHub can use it (it checks who is asking and knows only those
+eight buttons).
+
+**Start it:** double-click `firetv\start-key-helper.bat` and type the TV's
+address. It prints `StreamHub key helper ready`, or `already running`.
+
+**After the TV restarts** (power cut, system update — not standby), the helper
+is gone. The phone's remote says so; run the script again. ADB debugging has
+to stay switched on for this.
 
 ---
 

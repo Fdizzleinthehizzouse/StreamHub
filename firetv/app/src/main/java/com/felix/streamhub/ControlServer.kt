@@ -197,6 +197,8 @@ class ControlServer(
                     .put("adbConnected", false)
                     .put("hasToken", true)
                     .put("services", tvServices)
+                    // Whether the phone's remote pad can press keys right now.
+                    .put("keys", TvKeys.helperRunning())
             )
     }
 
@@ -379,20 +381,29 @@ class ControlServer(
         }
     }
 
-    /** Back / Home from the phone. Answers honestly when it could not press. */
+    /**
+     * The phone's remote buttons. Real key presses via [TvKeys]; Back and Home
+     * fall back to the accessibility service if ADB is unavailable. Answers
+     * honestly when nothing was pressed.
+     */
     private fun doRemote(session: IHTTPSession): Response {
         if (session.method != Method.POST) {
             return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "POST only."))
         }
-        val key = readBody(session).optString("key")
-        if (key !in setOf("back", "home")) {
-            return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown button."))
-        }
+        val key = TvKeys.Key.of(readBody(session).optString("key"))
+            ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown button."))
         AppLauncher.wakeScreen(context)
-        val pressed = ProfilePickerService.remote(key)
-            ?: return json(Response.Status.OK, JSONObject().put("ok", false).put("error", "The TV needs its one-time setup for this (see the README)."))
-        if (!pressed) return json(Response.Status.OK, JSONObject().put("ok", false).put("error", "The TV didn’t take that."))
-        return json(Response.Status.OK, JSONObject().put("ok", true))
+
+        fun ok() = json(Response.Status.OK, JSONObject().put("ok", true))
+        fun fail(why: String) = json(Response.Status.OK, JSONObject().put("ok", false).put("error", why))
+
+        return when (val r = TvKeys.press(key)) {
+            TvKeys.Result.Pressed -> ok()
+            is TvKeys.Result.Unavailable -> {
+                val fallback = if (key == TvKeys.Key.BACK || key == TvKeys.Key.HOME) ProfilePickerService.remote(key.name.lowercase()) else null
+                if (fallback == true) ok() else fail(r.reason)
+            }
+        }
     }
 
     /**

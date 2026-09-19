@@ -330,6 +330,9 @@ process.exit(0);
   // The desktop app's genre and rental fixes, which the TV app never had.
   await check('TV app: genres are OR-joined and rentals stay out of the rows', () => jvmTest('TmdbTest'));
 
+  // The key helper runs with shell rights; only StreamHub may drive it.
+  await check('the key helper serves only StreamHub, and only fixed keys', () => jvmTest('KeyServerTest'));
+
   // Against real picker dumps: never clicks "New", never guesses a name.
   await check('profile picking only clicks an exact, unique match on the real screens', () => jvmTest('ProfilePickersTest'));
 

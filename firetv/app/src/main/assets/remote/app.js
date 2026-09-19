@@ -571,15 +571,33 @@ function renderServices(host) {
         );
       })
     ),
-    el('h2', { class: 'page-title', style: { fontSize: '16px', marginTop: '26px' }, text: 'On the TV' }),
+    el('h2', { class: 'page-title', style: { fontSize: '16px', marginTop: '26px' }, text: 'Remote' }),
+    remotePad()
+  );
+}
+
+/** A TV remote: arrows around OK, then Back / Home / Play-pause. */
+function remotePad() {
+  const key = (k, label, extra = '') =>
+    el('button', { class: `remote-key ${extra}`.trim(), 'data-key': k, 'aria-label': k, text: label, onClick: () => pressTvKey(k) });
+  const keysOff = S.tv && S.tv.keys === false;
+  return el(
+    'div',
+    { class: 'remote' },
+    // Say it before a press fails, not only after.
+    keysOff
+      ? el('p', { class: 'remote-note', text: 'The TV’s key helper isn’t running. It stops when the TV restarts; start it again from the computer (see “Remote keys” in the README).' })
+      : null,
     el(
       'div',
-      { class: 'btn-row', style: { padding: '0 14px' } },
-      el('button', { class: 'btn remote-key', 'data-key': 'back', text: '‹ Back', onClick: () => pressTvKey('back') }),
-      el('button', { class: 'btn remote-key', 'data-key': 'home', text: '⌂ Home', onClick: () => pressTvKey('home') })
+      { class: 'dpad' },
+      key('up', '▲', 'up'),
+      key('left', '◀', 'left'),
+      key('ok', 'OK', 'ok'),
+      key('right', '▶', 'right'),
+      key('down', '▼', 'down')
     ),
-    // Arrows and OK aren't possible from an app; say so rather than offer them.
-    el('p', { class: 'page-sub', text: 'For moving around and pressing OK, use the TV remote.' })
+    el('div', { class: 'remote-row' }, key('back', '‹ Back'), key('home', '⌂ Home'), key('playpause', '⏯'))
   );
 }
 
