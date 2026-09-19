@@ -77,6 +77,7 @@ const server = http.createServer(async (req, res) => {
         { id: 'hbomax', name: 'HBO Max', short: 'HBO', color: '#8b5cf6', accent: '#8b5cf6', installed: false },
         { id: 'primevideo', name: 'Prime Video', short: 'PV', color: '#00a8e1', accent: '#00a8e1', installed: true },
       ],
+      genres: [{ id: 'comedy', name: 'Comedy' }, { id: 'scifi', name: 'Sci-fi & fantasy' }],
       state: { hasTmdbKey: hasKey, watchlist: [], pinned: [] },
       tv: { host: 'this-tv', tvApp: true, services: { netflix: true, disneyplus: true, hbomax: false, primevideo: true } },
     });
@@ -92,6 +93,10 @@ const server = http.createServer(async (req, res) => {
         { id: 'primevideo', name: 'Prime Video', profile: mine.primevideo || '' },
       ],
     });
+  }
+  if (p === '/api/genre') {
+    if (url.searchParams.get('id') !== 'scifi') return send(400, { error: 'Unknown genre.' });
+    return send(200, { genre: 'Sci-fi & fantasy', results: [{ ...TITLES[1], availableOn: [{ serviceId: 'hbomax', kind: 'included' }] }] });
   }
   if (p === '/api/home') {
     if (!hasKey) return send(200, { rows: [], needsKey: true });
@@ -203,6 +208,18 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(700);
   check('films load once the key is in', (await page.locator('.card').count()) >= 3);
   await page.screenshot({ path: path.join(__dirname, 'shots', '22-tv-home.png') });
+
+  check('home offers genres to browse', (await page.locator('.chip.genre').allTextContents()).join('|') === 'Comedy|Sci-fi & fantasy');
+  calls.length = 0;
+  await page.locator('.chip.genre[data-genre="scifi"]').click();
+  await page.waitForTimeout(500);
+  const genreCall = calls.find((c) => c.path === '/api/genre');
+  check('a genre asks the TV for that genre', genreCall && genreCall.query.id === 'scifi', JSON.stringify(genreCall));
+  check('and lists what is in it, tagged by service', (await page.locator('.grid .card').count()) === 1 && (await page.locator('.grid .card .badge').textContent()) === 'HBO');
+  await page.screenshot({ path: path.join(__dirname, 'shots', '25-tv-genre.png') });
+  await page.locator('#back-btn').click();
+  await page.waitForTimeout(400);
+  check('back returns home', (await page.locator('.chip.genre').count()) === 2);
 
   await page.locator('.tab[data-view="services"]').click();
   await page.waitForTimeout(300);

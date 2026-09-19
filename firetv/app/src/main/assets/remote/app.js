@@ -217,6 +217,7 @@ async function boot() {
     const data = await api('/api/state');
     S.services = data.services;
     S.svcById = Object.fromEntries(data.services.map((s) => [s.id, s]));
+    S.genres = data.genres || [];
     S.state = data.state;
     S.tv = data.tv;
   } catch (err) {
@@ -427,6 +428,36 @@ function setView(view, fromBack = false) {
   if (view === 'services') return renderServices(host);
   if (view === 'watchlist') return renderWatchlist(host);
   if (view === 'search') return; // rendered by doSearch
+  if (view === 'genre') return S.genre ? doGenre(S.genre, true) : renderHome(host);
+}
+
+/** A row of genre buttons, at the top of Home. */
+function genreChips() {
+  if (!S.genres || !S.genres.length) return null;
+  return el(
+    'div',
+    { class: 'genre-chips' },
+    S.genres.map((g) => el('button', { class: 'chip genre', text: g.name, 'data-genre': g.id, onClick: () => doGenre(g) }))
+  );
+}
+
+async function doGenre(genre, fromBack = false) {
+  S.genre = genre;
+  if (!fromBack) setView('genre');
+  const host = $('#view');
+  host.replaceChildren(el('h1', { class: 'page-title', text: genre.name }), el('div', { class: 'spinner' }));
+  try {
+    const data = await api(`/api/genre?id=${encodeURIComponent(genre.id)}`);
+    host.replaceChildren(
+      el('h1', { class: 'page-title', text: genre.name }),
+      el('p', { class: 'page-sub', text: 'On your four services' }),
+      data.results.length
+        ? el('div', { class: 'grid' }, data.results.map(card))
+        : el('div', { class: 'empty' }, el('strong', { text: 'Nothing here' }), 'None of your services has much in this genre right now.')
+    );
+  } catch (err) {
+    host.replaceChildren(el('div', { class: 'empty' }, el('strong', { text: 'Could not load' }), err.message));
+  }
 }
 
 function scoreClass(n) {
@@ -484,6 +515,8 @@ async function renderHome(host) {
   const pinned = S.state.pinned || [];
   host.replaceChildren();
 
+  const chips = S.state.hasTmdbKey === false ? null : genreChips();
+  if (chips) host.append(chips);
   if (pinned.length) host.append(section('Continue watching', pinned, { sub: 'Tap to send it to the TV' }));
 
   const spin = el('div', { class: 'spinner' });

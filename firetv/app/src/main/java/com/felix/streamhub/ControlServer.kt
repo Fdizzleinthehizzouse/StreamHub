@@ -97,6 +97,7 @@ class ControlServer(
             uri == "/api/state" -> json(Response.Status.OK, stateJson(deviceId))
             uri == "/api/home" -> doHome(deviceId)
             uri == "/api/search" -> doSearch(q("q"))
+            uri == "/api/genre" -> doGenre(q("id"))
             uri == "/api/details" -> doDetails(q("mediaType"), q("id"))
             uri == "/api/watchlist" -> doToggle(session, deviceId, pinned = false)
             uri == "/api/pinned" -> doToggle(session, deviceId, pinned = true)
@@ -180,8 +181,12 @@ class ControlServer(
         val tvServices = JSONObject()
         for (s in Services.ALL) tvServices.put(s.id, AppLauncher.isInstalled(context, s.id))
 
+        val genres = JSONArray()
+        for (g in Genres.ALL) genres.put(JSONObject().put("id", g.id).put("name", g.name))
+
         return JSONObject()
             .put("services", services)
+            .put("genres", genres)
             .put("state", store.snapshotJson(deviceId))
             .put(
                 "tv",
@@ -216,27 +221,57 @@ class ControlServer(
         val items = runCatching { runBlocking { tmdb.search(query) } }
             .getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Search failed")) }
 
-        // Search results say nothing about where a title streams, so each is
-        // looked up (in parallel; cached for 30 minutes) and anything none of
-        // the four carry is dropped.
+        val results = onTheFour(items)
+            ?: return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "Couldn’t check where these stream. Try again."))
+        return json(Response.Status.OK, JSONObject().put("results", results))
+    }
+
+    /** Films and series in one genre, from the four services only. */
+    private fun doGenre(id: String?): Response {
+        val g = Genres.byId(id) ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown genre."))
+        if (!tmdb.hasKey()) return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Add your TMDB key in Settings first."))
+        val items = runCatching {
+            runBlocking {
+                val providers = tmdb.providerIds().values.flatten()
+                coroutineScope {
+                    val films = async { g.movie?.let { tmdb.discover("movie", providers, it) }.orEmpty() }
+                    val series = async { g.tv?.let { tmdb.discover("tv", providers, it) }.orEmpty() }
+                    interleave(films.await(), series.await())
+                }
+            }
+        }.getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Could not load that genre.")) }
+        val results = onTheFour(items)
+            ?: return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "Couldn’t check where these stream. Try again."))
+        return json(Response.Status.OK, JSONObject().put("genre", g.name).put("results", results))
+    }
+
+    /**
+     * Each title tagged with which of the four carry it; titles none carry are
+     * dropped. TMDB search and discover say nothing about this per title, so
+     * each is looked up (in parallel; cached for 30 minutes).
+     * @return null if no lookup succeeded at all, rather than an empty list
+     *   that would read as "nothing is on your services".
+     */
+    private fun onTheFour(items: List<Title>): JSONArray? {
         val checked = runBlocking {
             runCatching { tmdb.providerIds() } // once, not once per parallel lookup
             coroutineScope {
-                items.take(SEARCH_CHECK_LIMIT).map { t ->
+                items.distinctBy { it.key }.take(SEARCH_CHECK_LIMIT).map { t ->
                     async { t to runCatching { tmdb.availability(t.mediaType, t.id) }.getOrNull() }
                 }.awaitAll()
             }
         }
-        if (checked.isNotEmpty() && checked.all { it.second == null }) {
-            return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "Couldn’t check where these stream. Try again."))
-        }
+        if (checked.isNotEmpty() && checked.all { it.second == null }) return null
         val results = JSONArray()
         for ((t, avail) in checked) {
             if (avail.isNullOrEmpty()) continue
             results.put(t.toJson().put("availableOn", availabilityJson(avail)))
         }
-        return json(Response.Status.OK, JSONObject().put("results", results))
+        return results
     }
+
+    private fun interleave(a: List<Title>, b: List<Title>): List<Title> =
+        (0 until maxOf(a.size, b.size)).flatMap { i -> listOfNotNull(a.getOrNull(i), b.getOrNull(i)) }
 
     private fun availabilityJson(list: List<Availability>): JSONArray {
         val arr = JSONArray()
