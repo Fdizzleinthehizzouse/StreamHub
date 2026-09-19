@@ -45,6 +45,9 @@ object Services {
             packages = listOf("com.netflix.ninja", "com.netflix.mediaclient"),
             tmdbNames = listOf("Netflix", "Netflix basic with Ads", "Netflix Standard with Ads"),
             titleUrl = { id -> "https://www.netflix.com/title/$id" },
+            // No search: on a real Fire TV nflx://www.netflix.com/search?q=
+            // opened the home screen, its https filter claims no /search path,
+            // and its screen exposes nothing to type into.
             search = null
         ),
         Service(
