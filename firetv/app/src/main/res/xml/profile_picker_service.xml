@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  packageNames keeps every other app's screen out of reach: events arrive only
+  from the services ProfilePickers knows. Keep it in step with that file.
+  flagReportViewIds makes view ids readable. flagIncludeNotImportantViews makes
+  the live tree match `uiautomator dump`, which is what ProfilePickers and its
+  tests were built from. Without it, on a real TV, Disney+'s profilesContent
+  and Prime Video's profile_add_icon were silently missing: Disney+ was never
+  recognised, and Prime's "New" tile could not be told apart from a profile.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="200"
+    android:packageNames="com.disney.disneyplus,com.disney.disneyplus.androidtv,com.amazon.firebat,com.amazon.avod,com.amazon.avod.thirdpartyclient"
+    android:description="@string/picker_service_description" />

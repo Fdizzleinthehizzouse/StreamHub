@@ -3,5 +3,6 @@
     <string name="app_name">StreamHub</string>
     <string name="search">Search</string>
     <string name="setup">Setup</string>
+    <string name="picker_service_description">When you send a title from your phone, picks your profile on the Disney+ and Prime Video \"Who\'s watching\" screens. Only acts right after StreamHub opens one of them.</string>
     <string name="attribution">Metadata by TMDB · availability by JustWatch · ratings by OMDb. This product uses the TMDB API but is not endorsed or certified by TMDB.</string>
 </resources>

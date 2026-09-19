@@ -138,6 +138,28 @@ class Store(private val prefs: SharedPreferences) {
         }
     }
 
+    // ---- which profile is this phone's, per service ----------------------
+    //
+    // Set once after pairing (and editable in Settings). `asked` means the
+    // phone has answered, even with nothing, so it is not asked again.
+
+    fun profileNames(deviceId: String): Map<String, String> {
+        val names = profileRecord(deviceId).optJSONObject("names") ?: return emptyMap()
+        return names.keys().asSequence().associateWith { names.optString(it) }.filterValues { it.isNotBlank() }
+    }
+
+    fun profilesAsked(deviceId: String): Boolean = profileRecord(deviceId).optBoolean("asked", false)
+
+    fun setProfileNames(deviceId: String, names: Map<String, String>) {
+        val record = JSONObject()
+            .put("asked", true)
+            .put("names", JSONObject().also { o -> names.forEach { (k, v) -> o.put(k, v) } })
+        prefs.edit().putString(key(deviceId, K_PROFILES), record.toString()).apply()
+    }
+
+    private fun profileRecord(deviceId: String): JSONObject =
+        runCatching { JSONObject(prefs.getString(key(deviceId, K_PROFILES), null) ?: "{}") }.getOrDefault(JSONObject())
+
     private fun key(deviceId: String, list: String): String {
         require(isValidDeviceId(deviceId)) { "bad device id" }
         return "dev.$deviceId.$list"
@@ -203,6 +225,7 @@ class Store(private val prefs: SharedPreferences) {
         private const val K_WATCHLIST = "watchlist"
         private const val K_PINNED = "pinned"
         private const val K_HISTORY = "history"
+        private const val K_PROFILES = "profiles"
         private const val K_SESSIONS = "sessions"
         private const val K_FAILED = "failedPairs"
         private const val K_LOCKED = "lockedUntil"

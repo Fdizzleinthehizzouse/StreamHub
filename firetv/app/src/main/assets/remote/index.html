@@ -27,6 +27,19 @@
       </div>
     </div>
 
+    <!-- once per phone, right after pairing -->
+    <div id="profiles-step" class="pair" hidden>
+      <div class="pair-card">
+        <h1>Which profile is yours?</h1>
+        <p>So the TV can pick it for you instead of asking “Who’s watching?”.</p>
+        <div id="profiles-fields" class="profile-fields"></div>
+        <p id="profiles-note" class="profile-note"></p>
+        <button id="profiles-save" class="btn primary big">Save</button>
+        <button id="profiles-skip" class="btn big" style="margin-top:10px">Skip</button>
+        <div id="profiles-err" class="pair-err"></div>
+      </div>
+    </div>
+
     <!-- main app -->
     <div id="app" hidden>
       <header class="top">
@@ -87,6 +100,10 @@
           <p class="overview" style="font-size:12.5px;margin-top:8px">
             What's on each service differs by country. BE for Belgium, FR for France, NL for the Netherlands.
           </p>
+
+          <div class="label">Your profiles</div>
+          <div id="set-profiles" class="profile-fields"></div>
+          <p id="set-profiles-note" class="profile-note"></p>
 
           <button class="btn primary big" id="settings-save" style="margin-top:22px">Save</button>
           <div id="settings-msg" class="overview" style="margin-top:14px;text-align:center"></div>

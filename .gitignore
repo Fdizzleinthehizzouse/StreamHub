@@ -15,3 +15,6 @@ firetv/.idea/
 
 # adb screen dumps - contain household profile names
 dumps/
+
+# personal Claude Code settings
+.claude/settings.local.json

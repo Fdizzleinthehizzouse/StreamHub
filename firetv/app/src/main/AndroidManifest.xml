@@ -8,6 +8,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- To end the screensaver before opening a service. -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- A TV has no touchscreen and is driven by a d-pad. -->
     <uses-feature android:name="android.software.leanback" android:required="true" />
@@ -74,6 +76,20 @@
             android:name=".ControlService"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <!-- Enabled by adb only; Fire TV has no settings UI for it. See README. -->
+        <service
+            android:name=".picker.ProfilePickerService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/profile_picker_service" />
+        </service>
 
     </application>
 </manifest>

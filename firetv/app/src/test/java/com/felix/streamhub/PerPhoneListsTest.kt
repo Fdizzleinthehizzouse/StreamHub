@@ -72,6 +72,41 @@ class PerPhoneListsTest {
     }
 
     @Test
+    fun profileNamesBelongToOnePhone() {
+        val phoneA = pair(DEVICE_A)
+        val phoneB = pair(DEVICE_B)
+
+        val (status, _) = call("POST", "/api/profiles", phoneA, """{"profiles":{"disneyplus":"Alice","netflix":"Alice"}}""")
+        assertEquals(200, status)
+
+        val a = JSONObject(call("GET", "/api/profiles", phoneA).second)
+        val b = JSONObject(call("GET", "/api/profiles", phoneB).second)
+        assertEquals("Alice", profileFor(a, "disneyplus"))
+        assertEquals(true, a.getBoolean("asked"))
+        assertEquals("", profileFor(b, "disneyplus"))
+        assertEquals(false, b.getBoolean("asked"))
+        assertFalse("netflix cannot be auto-picked, so it is not offered", a.toString().contains("netflix"))
+    }
+
+    /** The phone's fetch() sends `application/json` with no charset. */
+    @Test
+    fun accentsFromThePhoneSurviveTheTrip() {
+        val token = pair(DEVICE_A)
+        call("POST", "/api/profiles", token, """{"profiles":{"disneyplus":"Félix"}}""")
+        add(token, 194, "movie", "Amélie")
+
+        assertEquals("Félix", profileFor(JSONObject(call("GET", "/api/profiles", token).second), "disneyplus"))
+        val saved = JSONObject(call("GET", "/api/state", token).second)
+            .getJSONObject("state").getJSONArray("watchlist").getJSONObject(0).getString("title")
+        assertEquals("Amélie", saved)
+    }
+
+    private fun profileFor(o: JSONObject, serviceId: String): String {
+        val arr = o.getJSONArray("services")
+        return (0 until arr.length()).map { arr.getJSONObject(it) }.first { it.getString("id") == serviceId }.getString("profile")
+    }
+
+    @Test
     fun pairingWithoutADeviceIdIsRefused() {
         val code = store.ensureControlToken()
         assertEquals(400, call("POST", "/api/pair", null, """{"code":"$code"}""").first)

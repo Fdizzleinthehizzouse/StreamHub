@@ -110,6 +110,7 @@ function showPairing(message) {
       localStorage.setItem(TOKEN_KEY, token);
       S.token = token;
       $('#pair').hidden = true;
+      await askProfilesOnce();
       $('#app').hidden = false;
       boot();
     } catch (err) {
@@ -130,6 +131,76 @@ function showPairing(message) {
     input.value = input.value.toUpperCase();
     if (input.value.trim().length === 6) submit();
   };
+}
+
+/* ---------------------------------------------------------------- profiles */
+
+/** One field per service the TV can pick a profile on. */
+function renderProfileFields(box, note, data) {
+  box.replaceChildren(
+    ...data.services.map((s) =>
+      el(
+        'label',
+        {},
+        s.name,
+        el('input', {
+          class: 'setting-input',
+          type: 'text',
+          maxlength: '60',
+          autocapitalize: 'words',
+          autocorrect: 'off',
+          spellcheck: 'false',
+          placeholder: 'Your profile name, exactly as shown',
+          value: s.profile || '',
+          'data-service': s.id,
+        })
+      )
+    )
+  );
+  // Say plainly which services cannot do this, and whether the TV can yet.
+  note.textContent =
+    'Netflix and HBO Max don’t let other apps read their profile screen, so you’ll still choose those with the remote.' +
+    (data.enabled ? '' : ' This also needs a one-time setup on the TV before it works.');
+}
+
+function readProfileFields(box) {
+  const out = {};
+  box.querySelectorAll('input[data-service]').forEach((i) => {
+    out[i.dataset.service] = i.value.trim();
+  });
+  return out;
+}
+
+/** Right after pairing, once per phone. Never blocks getting into the app. */
+async function askProfilesOnce() {
+  let data;
+  try {
+    data = await api('/api/profiles');
+  } catch {
+    return; // Settings can do this later
+  }
+  if (data.asked || !data.services.length) return;
+
+  const step = $('#profiles-step');
+  const box = $('#profiles-fields');
+  renderProfileFields(box, $('#profiles-note'), data);
+  step.hidden = false;
+
+  await new Promise((done) => {
+    const send = async (profiles, alwaysContinue) => {
+      $('#profiles-err').textContent = '';
+      try {
+        await api('/api/profiles', { method: 'POST', body: { profiles } });
+        done();
+      } catch (err) {
+        if (alwaysContinue) done();
+        else $('#profiles-err').textContent = err.message;
+      }
+    };
+    $('#profiles-save').onclick = () => send(readProfileFields(box), false);
+    $('#profiles-skip').onclick = () => send({}, true);
+  });
+  step.hidden = true;
 }
 
 /* ---------------------------------------------------------------- boot */
@@ -288,6 +359,14 @@ async function openSettings() {
   } catch {
     /* first run, nothing saved yet */
   }
+  S.profilesLoaded = false;
+  $('#set-profiles').replaceChildren();
+  try {
+    renderProfileFields($('#set-profiles'), $('#set-profiles-note'), await api('/api/profiles'));
+    S.profilesLoaded = true;
+  } catch {
+    $('#set-profiles-note').textContent = 'Couldn’t load your profiles from the TV.';
+  }
 }
 
 async function saveSettings() {
@@ -302,6 +381,10 @@ async function saveSettings() {
   const msg = $('#settings-msg');
   msg.textContent = 'Saving…';
   try {
+    // Only if they loaded: saving blank fields would wipe names the TV has.
+    if (S.profilesLoaded) {
+      await api('/api/profiles', { method: 'POST', body: { profiles: readProfileFields($('#set-profiles')) } });
+    }
     const r = await api('/api/settings', { method: 'POST', body });
     msg.textContent = r.hasTmdbKey ? 'Saved. Loading your films…' : 'Saved — but the film key is still missing.';
     $('#set-tmdb').value = '';

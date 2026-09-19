@@ -3,6 +3,7 @@ package com.felix.streamhub
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.app.SearchManager
 import com.felix.streamhub.data.Service
 import com.felix.streamhub.data.Services
@@ -59,6 +60,21 @@ object AppLauncher {
     fun isInstalled(context: Context, serviceId: String): Boolean {
         val svc = Services.byId(serviceId) ?: return false
         return installedPackage(context, svc) != null
+    }
+
+    /**
+     * End the screensaver before opening anything. On a real Fire TV, an app
+     * started while the screensaver ran opened *behind* it: the phone said
+     * "opened" and the TV showed nothing. ACQUIRE_CAUSES_WAKEUP takes the
+     * system from dreaming back to awake, which dismisses the screensaver.
+     */
+    fun wakeScreen(context: Context) {
+        runCatching {
+            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+            @Suppress("DEPRECATION")
+            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "streamhub:wake")
+                .acquire(3_000)
+        }
     }
 
     fun launch(

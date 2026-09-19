@@ -4,6 +4,8 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.felix.streamhub.data.*
+import com.felix.streamhub.picker.ProfilePickerService
+import com.felix.streamhub.picker.ProfilePickers
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -96,6 +98,7 @@ class ControlServer(
             uri == "/api/watchlist" -> doToggle(session, deviceId, pinned = false)
             uri == "/api/pinned" -> doToggle(session, deviceId, pinned = true)
             uri == "/api/play" -> doPlay(session, deviceId)
+            uri == "/api/profiles" -> doProfiles(session, deviceId)
             uri == "/api/settings" -> doSettings(session)
             else -> json(Response.Status.NOT_FOUND, JSONObject().put("error", "Not found"))
         }
@@ -277,6 +280,8 @@ class ControlServer(
         val titleText = item?.optString("title")?.ifBlank { null } ?: body.optString("title").ifBlank { null }
         val contentId = body.optString("contentId").ifBlank { null }
 
+        AppLauncher.wakeScreen(context)
+
         // No service named means "find this anywhere" - the phone's Search on TV
         // button, used exactly when none of the four carry it.
         if (serviceId.isBlank()) {
@@ -300,6 +305,9 @@ class ControlServer(
         val svc = Services.byId(serviceId)
             ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown service"))
 
+        // Armed before launching, so the picker cannot appear before we look.
+        store.profileNames(deviceId)[serviceId]?.let { ProfilePickerService.arm(serviceId, it) }
+
         // Starting another app has to happen on the main thread.
         var result: AppLauncher.Result? = null
         val latch = java.util.concurrent.CountDownLatch(1)
@@ -322,6 +330,38 @@ class ControlServer(
             null ->
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", "Timed out starting ${svc.name}."))
         }
+    }
+
+    /**
+     * Which profile is this phone's on each service that can be auto-picked.
+     * Only services with a recognizer are offered; the others cannot work.
+     */
+    private fun doProfiles(session: IHTTPSession, deviceId: String): Response {
+        if (session.method == Method.POST) {
+            val given = readBody(session).optJSONObject("profiles") ?: JSONObject()
+            val names = ProfilePickers.ALL.associate { p ->
+                p.serviceId to given.optString(p.serviceId, "").trim().take(60)
+            }.filterValues { it.isNotEmpty() }
+            store.setProfileNames(deviceId, names)
+        }
+        val names = store.profileNames(deviceId)
+        val services = JSONArray()
+        for (p in ProfilePickers.ALL) {
+            services.put(
+                JSONObject()
+                    .put("id", p.serviceId)
+                    .put("name", Services.byId(p.serviceId)?.name ?: p.serviceId)
+                    .put("profile", names[p.serviceId] ?: "")
+            )
+        }
+        return json(
+            Response.Status.OK,
+            JSONObject()
+                .put("asked", store.profilesAsked(deviceId))
+                // Honest about whether it can work yet: the TV-side switch is adb-only.
+                .put("enabled", ProfilePickerService.isRunning)
+                .put("services", services)
+        )
     }
 
     /** So the API key is typed on a phone keyboard, never with a TV remote. */
@@ -378,11 +418,19 @@ class ControlServer(
         }
     }
 
+    /**
+     * Decoded as UTF-8 here, not by NanoHTTPD's parseBody: with no charset in
+     * the content-type - which is exactly what the phone's fetch() sends -
+     * parseBody decodes as ASCII, and on a real TV "Félix" arrived as
+     * "F��lix". Every accented profile name or title was mangled.
+     */
     private fun readBody(session: IHTTPSession): JSONObject {
-        val files = HashMap<String, String>()
-        runCatching { session.parseBody(files) }
-        val raw = files["postData"] ?: return JSONObject()
-        return runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
+        val len = session.headers["content-length"]?.toIntOrNull() ?: return JSONObject()
+        if (len <= 0 || len > ControlService.MAX_BODY_BYTES) return JSONObject()
+        val bytes = ByteArray(len)
+        runCatching { java.io.DataInputStream(session.inputStream).readFully(bytes) }
+            .onFailure { return JSONObject() }
+        return runCatching { JSONObject(String(bytes, Charsets.UTF_8)) }.getOrDefault(JSONObject())
     }
 
     private fun json(status: Response.Status, obj: JSONObject): Response =

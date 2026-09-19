@@ -95,6 +95,49 @@ Tip: use your phone browser's **Add to Home Screen** so it's one tap away.
 
 ---
 
+## Step 4 (optional) — let the TV pick your profile
+
+After pairing, your phone asks which **Disney+** and **Prime Video** profile is
+yours. With this switched on, when you send a title the TV clicks your profile
+on the "Who's watching?" screen for you.
+
+- **Netflix and HBO Max can't do this.** Their apps don't let anything else read
+  their screen. (On a real Fire TV, HBO Max skipped its picker anyway.)
+- It only clicks when it can see the picker **and** finds your exact name on it.
+  Otherwise it does nothing and leaves you on the picker.
+- Only acts for 90 seconds after StreamHub opens Disney+ or Prime Video, and
+  can't see any other app. Nothing is recorded.
+
+Fire TV has no settings screen for this, so it's switched on from the computer,
+once. First check nothing else is using it:
+
+```
+adb shell settings get secure enabled_accessibility_services
+```
+
+If that prints `null`, run:
+
+```
+adb shell settings put secure enabled_accessibility_services com.felix.streamhub/com.felix.streamhub.picker.ProfilePickerService
+adb shell settings put secure accessibility_enabled 1
+adb reboot
+```
+
+If it printed something else, keep it by putting it first, followed by a colon,
+so you don't switch that off:
+`...enabled_accessibility_services <what it printed>:com.felix.streamhub/com.felix.streamhub.picker.ProfilePickerService`
+
+To switch it off again: `adb shell settings delete secure enabled_accessibility_services`
+and reboot. (That also switches off anything else that was listed. If
+something was, put it back with the `put` command above, leaving StreamHub out.)
+
+**When it stops working** — likely after Disney+ or Prime Video redesign that
+screen — you're just back to choosing with the remote. To see what went wrong,
+run `adb logcat -s StreamHubPicker` and send a title. The recognition lives in
+one file, `picker/ProfilePickers.kt`.
+
+---
+
 ## Using it
 
 Browse or search on your phone. Tap a film. It tells you which of your four
@@ -139,9 +182,11 @@ stays paired; you don't have to redo anything.
   real defects, all since fixed. The worst would have meant only the *first*
   film you picked ever played, and another would have opened Netflix's home
   screen instead of your film.
-- **But I have never run this on a Fire TV**, because I don't have one. The
-  build step and how the TV behaves in the room are unproven. Expect at least
-  one hiccup, and send me whatever you see.
+- **On a real Fire TV** (Fire OS 7.7.1.4): it installs, all four services are
+  detected, and it opens HBO Max and Prime Video, including as the second launch
+  of the evening. That test found a real bug: HBO Max read as "not installed".
+  It's fixed now. Sending a *title* (universal search) and browsing from a
+  phone have not been tried on the TV yet.
 
 ### The one I'd watch for
 

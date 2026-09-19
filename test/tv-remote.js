@@ -37,6 +37,7 @@ const TITLES = [
 
 let hasKey = false;
 let token = null;
+let profiles = null; // null: this phone has never been asked
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 const server = http.createServer(async (req, res) => {
@@ -78,6 +79,18 @@ const server = http.createServer(async (req, res) => {
       ],
       state: { hasTmdbKey: hasKey, watchlist: [], pinned: [] },
       tv: { host: 'this-tv', tvApp: true, services: { netflix: true, disneyplus: true, hbomax: false, primevideo: true } },
+    });
+  }
+  if (p === '/api/profiles') {
+    if (req.method === 'POST') profiles = body.profiles || {};
+    const mine = profiles || {};
+    return send(200, {
+      asked: profiles !== null,
+      enabled: false,
+      services: [
+        { id: 'disneyplus', name: 'Disney+', profile: mine.disneyplus || '' },
+        { id: 'primevideo', name: 'Prime Video', profile: mine.primevideo || '' },
+      ],
     });
   }
   if (p === '/api/home') {
@@ -133,7 +146,7 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(400);
 
   check('the TV serves the pairing screen', await page.locator('#pair').isVisible());
-  check('it asks for the code shown on the TV', (await page.locator('.pair-card p').textContent()).toLowerCase().includes('tv'));
+  check('it asks for the code shown on the TV', (await page.locator('#pair .pair-card p').textContent()).toLowerCase().includes('tv'));
 
   await page.fill('#pair-code', 'wrong1');
   await page.waitForTimeout(900);
@@ -141,7 +154,20 @@ const server = http.createServer(async (req, res) => {
 
   await page.fill('#pair-code', CODE.toLowerCase()); // typed in lower case on a phone
   await page.waitForTimeout(900);
-  check('the code works regardless of letter case', await page.locator('#app').isVisible());
+  check('the code works regardless of letter case', await page.locator('#profiles-step').isVisible());
+
+  check('after pairing it asks which profile is yours', (await page.locator('#profiles-step h1').textContent()).includes('profile'));
+  const offered = await page.locator('#profiles-fields label').allTextContents();
+  check('only for the services that can pick one', offered.length === 2 && offered.join().includes('Disney+') && !offered.join().includes('Netflix'), JSON.stringify(offered));
+  check('and says why Netflix and HBO Max are not there', (await page.locator('#profiles-note').textContent()).includes('Netflix'));
+  check('and that the TV still needs its one-time setup', (await page.locator('#profiles-note').textContent()).includes('one-time setup'));
+  await page.screenshot({ path: path.join(__dirname, 'shots', '19-tv-profiles.png') });
+  await page.fill('#profiles-fields input[data-service="disneyplus"]', 'Félix');
+  await page.locator('#profiles-save').click();
+  await page.waitForTimeout(700);
+  const profPost = calls.filter((c) => c.path === '/api/profiles' && c.method === 'POST').pop();
+  check('saving sends the names to the TV', profPost && profPost.body.profiles.disneyplus === 'Félix' && profPost.body.profiles.primevideo === '', JSON.stringify(profPost && profPost.body));
+  check('then you are in', await page.locator('#app').isVisible() && await page.locator('#profiles-step').isHidden());
   const firstPair = calls.filter((c) => c.path === '/api/pair').pop();
   const firstDevice = firstPair && firstPair.body.deviceId;
   check('pairing tells the TV which phone this is', /^[a-f0-9]{32}$/.test(firstDevice || ''), JSON.stringify(firstPair && firstPair.body));
@@ -154,6 +180,7 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(400);
   check('the settings sheet opens', await page.locator('#settings-wrap').isVisible());
   check('it explains where to get the key', (await page.locator('#settings-wrap').textContent()).includes('themoviedb.org'));
+  check('settings shows the profile you saved, so a typo can be fixed', (await page.inputValue('#set-profiles input[data-service="disneyplus"]')) === 'Félix');
   await page.fill('#set-tmdb', 'MY-TMDB-KEY');
   await page.fill('#set-region', 'be');
   await page.screenshot({ path: path.join(__dirname, 'shots', '21-tv-settings.png') });
@@ -255,7 +282,7 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(900);
   const rePair = calls.filter((c) => c.path === '/api/pair').pop();
   check('re-pairing presents the same device id', rePair && rePair.body.deviceId === firstDevice, `${firstDevice} vs ${rePair && rePair.body.deviceId}`);
-  check('and gets you back in', await page.locator('#app').isVisible());
+  check('and gets you back in, without asking about profiles again', await page.locator('#app').isVisible() && await page.locator('#profiles-step').isHidden());
 
   // an unreachable TV must offer a retry, not a dead screen
   server.close();
