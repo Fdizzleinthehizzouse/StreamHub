@@ -61,6 +61,28 @@ Gotchas that cost time:
 - Git Bash mangles `/sdcard/...` in `adb pull`: use `//sdcard/...`.
 - `dumps/tree.js file.xml` prints a uiautomator dump as an indented tree.
 
+## Update — later on 2026-09-19: done since the notes below
+
+- **Full remote on the phone** (arrows, OK, Back, Home, play/pause). The in-app
+  ADB plan failed: Fire OS 7.7.1.4 refuses ADB from apps on the TV (every
+  address; the same client from a PC works). Instead `keys/KeyServer` runs from
+  StreamHub's APK via `app_process` as the shell user (started per boot with
+  `firetv/start-key-helper.bat`), injects keys like `input`, listens on
+  127.0.0.1:8724 (a unix socket is denied by SELinux) and serves only
+  StreamHub's uid via /proc/net/tcp. It also answers `PLAYING` from
+  `dumpsys media_session`.
+- **Autoplay on Prime Video and Disney+**, verified live (~12 s and ~22 s from
+  fully closed). Recognisers `resultTile` / `playButton` / `pageTitle` in
+  `picker/ProfilePickers.kt`; every press = focus, re-read the node, OK key.
+  Playing is confirmed from the media session; the phone follows `/api/autoplay`.
+- **HBO Max:** `https://play.max.com/<P8298 id>` (e.g. `show/<uuid>`) opens the
+  exact title page, no picker, with "Watch S1 E1" highlighted; OK plays it, and
+  the media session reports the title ("…, The Last of Us"). Not built: pressing
+  OK there can't be confirmed first (screen unreadable) — awaiting Félix's call.
+- **Netflix:** still no route to a title; the phone's remote pad is the answer.
+
+The sections below are the earlier state, kept for the history.
+
 ## Work in progress: autoplay + full remote
 
 Félix wants (1) the title to **start playing** when he taps it on the phone,

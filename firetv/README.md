@@ -169,16 +169,18 @@ one of your four services, tagged with which. Tap a film, tap a service, and
 the TV opens it. How close it gets depends on the service (tested on a real
 Fire TV):
 
-| Service | What the TV shows |
+| Service | What happens |
 |---|---|
-| **Prime Video** | its search results for that film |
-| **Disney+** | its search results for that film (with the TV helper on; otherwise its search page, and you type) |
-| **HBO Max** | its search page. You type the title with the remote |
-| **Netflix** | its home screen. You find the title yourself |
+| **Prime Video** | **starts playing by itself** (with the TV helper and key helper on); otherwise its search results |
+| **Disney+** | **starts playing by itself**, in your profile (same); otherwise its search, filled in |
+| **HBO Max** | its search page. You type the title (the phone's remote pad works here) |
+| **Netflix** | its home screen. You find the title (the phone's remote pad works here) |
 
-Your phone tells you which of these happened. You then pick the title and press
-play with the TV remote. None of the services publish what an outside app
-would need to start a film directly.
+"Starts by itself" means the TV finds the exact title, opens it and presses
+Play, checking at every step that the highlight is on the right thing. Your
+phone shows each step and says "▶ Playing" only once the TV confirms it. If
+anything doesn't match — the title isn't in the results, a different title
+opened, your profile isn't on the picker — it stops and tells you where.
 
 ---
 
