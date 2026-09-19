@@ -1,103 +1,131 @@
 # Handover
 
-Written for whoever picks this up next in Claude Code. `CLAUDE.md` is the
-operational brief; this is the history and the honest state of things.
+`CLAUDE.md` is the operational brief; this is the state of play, what was
+learned on the real TV, and exactly where work stopped. Last updated 2026-09-19.
 
 ## Where this came from
 
-It started as "an app on my PC where I can log into all four services and watch
-my shows in one place" and arrived, over several turns, at something quite
-different: **the PC is gone, and the phone is a remote for the Fire TV.** That
-change came from Félix, not from me, and it was right. Worth knowing because
-there is a large legacy Electron app in `src/` that is no longer the point.
-
-What he actually wants, in his words: *"essentially, there is no actual data
-being processed, more of a fancy remote control."*
-
-He is not a developer. Explanations should be in plain language, and a wall of
-technical detail is worse than a short answer. He has been patient with a lot of
-it already.
+It began as "log into all four services on my PC" and became, at Félix's
+direction, **the phone is a remote for the Fire TV**. The legacy Electron app in
+`src/` is from that first phase. Félix is not a developer: plain language,
+lead with what he can do, be straight about what is unverified. He tests
+carefully and pushes back when something is overstated — reward that.
 
 ## State
 
 | | |
 |---|---|
-| Fire TV app (`firetv/`) | Complete. Type-checked, never compiled with a real SDK, never run. |
-| Phone UI (`firetv/app/src/main/assets/remote/`) | Complete, 28 browser checks passing against a mocked TV. |
-| Legacy desktop app (`src/`) | Works. 139 checks. Not part of the phone→TV flow. |
-| Overall | **167 automated checks passing. Zero Kotlin compile errors.** |
+| Fire TV app | Builds, installed and running on the real TV. |
+| Phone UI | Works against the TV (driven from a PC); **not yet used from a real phone's browser**. |
+| Commits | On `master`, not pushed. |
 
-## The immediate job
+Working on the real TV today:
+- Pairing; per-phone watchlist, pinned and recommendations (keyed on a device id
+  the phone generates — survives re-pairing).
+- Sending a title → each service's own search (table in CLAUDE.md). Never Silk.
+- Search and genre browsing show only titles on the four services, tagged.
+- Profile picking on **Disney+** (verified live) and Disney+ search typing.
+  **Prime Video** profile picking is tested only against a saved screen: Prime
+  skipped its picker in every later live test.
+- Launching wakes the TV from its screensaver. Back / Home from the phone.
 
-**Get `./gradlew assembleDebug` to succeed**, then install on the TV and find
-out what reality says. Everything else is secondary — the code is as good as it
-can get without hardware.
+**Félix's own phone has no profile names saved** (device `65112f…` answered the
+profile step with nothing), so nothing gets picked for him until he fills in
+Settings → Your profiles.
 
-Suggested first moves:
+## The real TV
 
-1. `cd firetv && ./gradlew assembleDebug` and work through whatever it says.
-   Dependency versions in `app/build.gradle.kts` were current when written and
-   are the most likely first failure.
-2. Run `npm test` to confirm the JS side still passes on a real machine (the
-   tests were sandbox-bound until recently; the Chromium path is now resolved
-   via Playwright with a `CHROME_BIN` override).
-3. Once it installs: the four things to observe are whether the universal-search
-   intent actually fires, whether the *second* launch of a session works (see
-   the `targetSdk = 28` note), whether the phone reaches the TV over his wifi,
-   and how the app feels on a low-memory TV.
+- Thomson Fire TV, model AFT6E0FA, **Fire OS 7.7.1.4 (Android 9, API 28)**, IP
+  `192.168.129.76`, StreamHub at `http://192.168.129.76:8723`.
+- ADB debugging is ON. The accessibility service is enabled
+  (`enabled_accessibility_services = com.felix.streamhub/com.felix.streamhub.picker.ProfilePickerService`).
+- Packages: `com.netflix.ninja`, `com.disney.disneyplus`, `com.hbo.hbonow`
+  (TV-launcher only), `com.amazon.firebat` (the Prime UI; `com.amazon.avod` is a
+  background part — never launch it).
+- This PC is paired as a test "phone": device id `0000…c0de`, token in
+  `dumps/.pc-token`. Its Prime profile name is the dummy "Nobody Here".
 
-## What was already found and fixed — don't reintroduce these
+Gotchas that cost time:
+- Screensaver after 5 min idle; adb `am start` does not wake it
+  (`input keyevent KEYCODE_WAKEUP` does). `uiautomator dump` returns
+  "null root node" just after it ends — toggling the service or waiting fixes it.
+- adb over wifi drops ("device offline") every so often: `adb disconnect`, `adb connect`.
+- The TV's log level hides `Log.d`; use `Log.i`+. Logcat truncates entries at ~4 KB.
+- The accessibility service must request `flagIncludeNotImportantViews`, or the
+  live tree lacks nodes `uiautomator dump` shows. A reinstall kept old flags
+  until set at runtime (done in `onServiceConnected`).
+- Disney+ sends one window event before its screen exists, then none: the
+  service polls while armed instead of waiting for events.
+- Request bodies without a charset were decoded as ASCII by NanoHTTPD
+  ("Félix" → "F��lix"); `readBody` decodes UTF-8 itself.
+- Git Bash mangles `/sdcard/...` in `adb pull`: use `//sdcard/...`.
+- `dumps/tree.js file.xml` prints a uiautomator dump as an indented tree.
 
-Two rounds of adversarial review found 41 real defects across the project. The
-ones most likely to creep back:
+## Work in progress: autoplay + full remote
 
-- **`preferUniversalSearch = false`** made the TV open Netflix's *home screen*
-  instead of the title. Without a `contentId`, universal search is the only path
-  that reaches a specific title. `test/tv-remote.js` guards the call shape.
-- **`targetSdk` above 28** reintroduces the background-activity-launch block, so
-  only the first title of a session opens. Silent failure.
-- **Returning HTTP 200 with `{ok:false}`** and having the client not check it.
-  Two endpoints did this; a missing app reported as a success.
-- **`Title.toJson()` dropping `key`.** The phone matches watchlist entries on
-  `key`; without it every "is this saved?" check silently answered no and
-  tapping twice deleted what you just added.
-- **In-memory pairing tokens.** Fire TV kills backgrounded apps constantly, so
-  sessions live in `Store` (SharedPreferences), not a field.
-- **Genres joined with `,` instead of `|`** in TMDB discover. `,` is AND, so
-  "Picks for you" asked for titles carrying all four genres at once and silently
-  never rendered.
+Félix wants (1) the title to **start playing** when he taps it on the phone,
+without the TV remote, (2) **OK and arrow buttons** on the phone. He approved
+the approach below for the remote. Nothing of it is built in the app yet; all
+findings are from adb experiments.
 
-`test/regressions.js` has one test per defect. If you change behaviour there,
-read the comment first — each one is a scar.
+### Key presses (the enabling piece)
+
+Apps cannot inject keys, and accessibility clicks are ignored by Prime. But the
+**adb shell user is in the `input` group**, so it can write real key events to
+the virtual keyboard device `/dev/input/event9` ("amzkeyboard"):
+
+```
+sendevent /dev/input/event9 1 <code> 1; sendevent /dev/input/event9 0 0 0
+sendevent /dev/input/event9 1 <code> 0; sendevent /dev/input/event9 0 0 0
+```
+
+Codes: UP 103, DOWN 108, LEFT 105, RIGHT 106, OK (SELECT) 353, BACK 158,
+HOME 172, PLAYPAUSE 164. ~200 ms per press (vs 1–1.4 s for `input keyevent`).
+Verified: arrows move focus, OK opens the highlighted item in Prime.
+
+Plan agreed with Félix: StreamHub connects to its **own** adbd on
+`localhost:5555` with an embedded ADB client (e.g. the `dadb` library), which
+needs a one-time "Allow USB debugging?" approval on the TV and ADB debugging to
+stay on. Lock the API to a fixed set of keys — never arbitrary shell. The
+device path `event9` should be found by name at runtime, not hard-coded.
+
+### Autoplay, per service
+
+- **Prime Video — proven by hand.** Search link → results; confirm the focused
+  tile's content-desc starts with the title → OK → title page; confirm focus is
+  `watch_now_button` → OK → `PlaybackActivity`, media session `state=3`. Needs:
+  navigating to the right tile when it isn't the first (move, re-read focus,
+  bounded), and a profile pick first on cold start.
+- **Disney+ — likely the same** (screens readable, search typed in); untested.
+- **Netflix — unsolved.** Cold start always shows "Who's watching?", and a deep
+  link given at that point is lost after the pick (lands on home).
+  `nflx://www.netflix.com/watch/<id>`, `https://…/watch/<id>` and
+  `…/title/<id>` all ended on home even with a profile already chosen (tested
+  with Stranger Things, 80057281). Screen unreadable and screenshots blocked;
+  only the media session shows whether something is playing.
+- **HBO Max — untested.** Search page only; screenshots do work.
+  `https://play.max.com/show/<uuid>` (from Wikidata) not yet tried.
+
+### Content ids: Wikidata (legitimate, CC0)
+
+TMDB id → Wikidata item via `haswbstatement:P4947=<movie>` / `P4983=<tv>`, then
+`wbgetentities`. Properties: Netflix P1874, HBO Max P8298 (`show/<uuid>`),
+Disney+ P7595 movie / P7596 series, Prime P8055 (ASIN, often US) / P14462 (GTI).
+Coverage is partial (House of the Dragon had none). The SPARQL endpoint was very
+slow; the regular API rate-limits bursts — cache and go slowly.
+
+## What to do next
+
+1. Build the in-app ADB client and `/api/remote` for up/down/left/right/ok/back/
+   home; phone button pad. Handle the one-time approval prompt honestly.
+2. Prime autoplay using key presses + the confirm-before-each-press loop; report
+   "playing" only when the media session says so.
+3. Try Disney+ the same way; try HBO Max show links; revisit Netflix.
+4. Then "the remaining fixes" Félix mentioned (ask him for the list — it was
+   sent to a side session that hit a usage limit).
 
 ## Open questions for Félix
 
-1. **Has he checked the TV's Fire OS version?** Asked several times, never
-   answered. `Settings → My Fire TV → About`: a version starting 3/5/6/7/8/14 is
-   fine; one labelled "OS" starting with 1 is Vega, and the whole approach is
-   dead. Worth confirming before he installs Android Studio.
-2. **Does the legacy `src/` Electron app stay?** It is dead weight for what he
-   wants now. Deleting it would halve the repo. It was left in only because it
-   works and he may want the desk-browsing surface one day.
-3. **Is one extra press on the TV remote acceptable?** He has been told, and
-   accepted it, but it is the main gap between this and what he first pictured.
-
-## Things I could not verify, and you should not assume
-
-- No Fire TV hardware, ever. Nothing in `firetv/` has executed.
-- `NanoHTTPD.Response.Status.PAYLOAD_TOO_LARGE` could not be confirmed to exist
-  in 2.3.1, so the body-size refusal uses `BAD_REQUEST`. If you confirm it is
-  there, 413 is more correct.
-- The `AsyncRunner` interface shape for bounding the thread pool. Attempted,
-  reverted, replaced with a semaphore. See the comment in `ControlServer.serve`.
-- Whether a plain-HTTP LAN origin lets the phone install the UI as a proper
-  standalone web app. Service workers need a secure context, so expect a browser
-  shortcut rather than a true installed app. He was told this after I had
-  initially over-claimed it.
-
-## Tone note
-
-When reporting back to him: lead with what he can do, keep the mechanism brief,
-and be straight about what is unverified. He asked for a "comprehensive debug"
-twice and both times it found something serious, so he is right to be
-sceptical — reward that rather than reassuring him.
+- Does the legacy `src/` Electron app stay? It is dead weight for the TV flow.
+- Push to a remote? Nothing has been pushed.
+- Android Studio needs a Gradle/AGP upgrade to open the project (Java 25).
