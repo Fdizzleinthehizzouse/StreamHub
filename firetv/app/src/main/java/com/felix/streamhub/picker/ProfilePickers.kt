@@ -13,9 +13,10 @@ import java.util.Locale
  * or read the tree ProfilePickerService logs under the tag StreamHubPicker,
  * then update that service's section below.
  *
- * Netflix and HBO Max are absent on purpose. Both draw their whole screen
- * themselves and expose no text to accessibility, so there is nothing to read.
- * (HBO Max also skipped its picker on that TV.)
+ * Netflix and HBO Max have no picker section on purpose. Both draw their whole
+ * screen themselves and expose no text to accessibility, so there is nothing
+ * to read. (HBO Max also skipped its picker on that TV.) HBO Max's section
+ * near the end is for BlindPlay, which drives it without reading it.
  *
  * Rules every section follows: the screen must positively look like the
  * picker, exactly one profile must match the name, and the node clicked must
@@ -36,6 +37,71 @@ object ProfilePickers {
         val parent: Node?
         val children: List<Node>
     }
+
+    /**
+     * The title sent from the phone, as TMDB names it. [isMovie]: a title
+     * page's date is the release year for a film, but the latest season's for
+     * a series (Prime showed 2026 for The Boys, TMDB says 2019), so only films
+     * are year-checked on their page.
+     */
+    data class Wanted(val title: String, val year: Int?, val isMovie: Boolean = false)
+
+    /** A title as a service shows it; year only if the screen shows one. */
+    data class Shown(val name: String, val year: Int?)
+
+    /** How sure a match is. Year-confirmed beats name-only. */
+    enum class Match { EXACT_WITH_YEAR, CONTAINS_WITH_YEAR, EXACT }
+
+    /**
+     * Whether [shown] is the [wanted] title. Services name titles their own
+     * way - seen on the real TV: Disney+ "Marvel Studios' Avengers: Endgame"
+     * for TMDB's "Avengers: Endgame"; Prime "Road House (2024)" beside the
+     * 1989 "Road House". So: words only (case, punctuation and apostrophes
+     * ignored); a "(YYYY)" in the name counts as its year; years must agree
+     * within one where both are known; and a longer name that merely contains
+     * the title counts only with the year confirmed.
+     */
+    fun titleMatch(shown: Shown, wanted: Wanted): Match? {
+        var name = shown.name
+        var year = shown.year
+        YEAR_SUFFIX.find(name)?.let {
+            year = year ?: it.groupValues[1].toInt()
+            name = name.removeRange(it.range)
+        }
+        val s = words(name)
+        val w = words(wanted.title)
+        if (w.isEmpty() || s.isEmpty()) return null
+        val yearKnown = year != null && wanted.year != null
+        if (yearKnown && Math.abs(year!! - wanted.year!!) > 1) return null
+        return when {
+            s == w -> if (yearKnown) Match.EXACT_WITH_YEAR else Match.EXACT
+            yearKnown && " $s ".contains(" $w ") -> Match.CONTAINS_WITH_YEAR
+            else -> null
+        }
+    }
+
+    /**
+     * The one tile to open: the best kind of match there is ([Match] order),
+     * provided only one tile has it. On the real TV Disney+ listed "The
+     * Mandalorian" (2019) beside "Disney Gallery / Star Wars: The Mandalorian"
+     * (2020): the exact name wins. Two equally good candidates means we can't
+     * tell them apart, so null - never a guess.
+     */
+    fun bestTile(candidates: List<Pair<Node, Shown>>, wanted: Wanted): Node? {
+        val scored = candidates.mapNotNull { (n, s) -> titleMatch(s, wanted)?.let { n to it } }
+        val best = scored.minOfOrNull { it.second.ordinal } ?: return null
+        return scored.filter { it.second.ordinal == best }.singleOrNull()?.first
+    }
+
+    private val YEAR_SUFFIX = Regex("\\s*\\((\\d{4})\\)\\s*$")
+    private val ANY_YEAR = Regex("\\b(19|20)\\d{2}\\b")
+
+    /** First plausible year in a metadata line ("12+ 2019 • Super Heroes"). */
+    fun yearIn(s: String): Int? = ANY_YEAR.find(s)?.value?.toInt()
+
+    private fun words(s: String) = fold(s).replace(NOT_WORD, " ").trim().replace(SPACES, " ")
+
+    private val NOT_WORD = Regex("[^\\p{L}\\p{N}]+")
 
     sealed class Outcome {
         /** Not the picker (yet). Keep waiting. */
@@ -72,12 +138,12 @@ object ProfilePickers {
         val packages: Set<String>,
         /** The search page's text box, for services whose search link leaves it empty. */
         val searchBox: ((root: Node) -> Node?)? = null,
-        /** On search results: the one tile for exactly this title, or null. */
-        val resultTile: ((root: Node, title: String) -> Node?)? = null,
+        /** On search results: the one tile for this title (see [bestTile]), or null. */
+        val resultTile: ((root: Node, wanted: Wanted) -> Node?)? = null,
         /** On a title's page: the button that starts playback, or null. */
         val playButton: ((root: Node) -> Node?)? = null,
-        /** On a title's page: its name, to confirm it's the right one before Play. */
-        val pageTitle: ((root: Node) -> String?)? = null,
+        /** On a title's page: its name (and year, if shown), to confirm it before Play. */
+        val pageTitle: ((root: Node) -> Shown?)? = null,
         val recognise: (root: Node, name: String) -> Outcome
     )
 
@@ -103,22 +169,31 @@ object ProfilePickers {
     // such box must be on screen.
     //
     // Autoplay: each result is a focusable shelfItemRootLayout holding a
-    // `title` TextView with exactly the title's name. A title's page names it
-    // in detailLogoImage's description, and its first button,
-    // detailPageMainButtonOne, is PLAY (focused when the page opens).
+    // `title` TextView (Disney's own name: "Marvel Studios' Avengers:
+    // Endgame") and a `metadata` line with the year ("12+ 2019 • ..."). A
+    // title's page names it in detailLogoImage's description, the year is in
+    // detailPageMetadataRoot's, and its first button, detailPageMainButtonOne,
+    // is PLAY (focused when the page opens).
 
     private fun disneyPlus() = Picker(
         serviceId = "disneyplus",
         packages = setOf("com.disney.disneyplus", "com.disney.disneyplus.androidtv"),
         searchBox = { root -> root.all { it.viewId.endsWith(":id/searchEditText") }.singleOrNull() },
-        resultTile = { root, title ->
-            root.all { tile ->
-                tile.viewId.endsWith(":id/shelfItemRootLayout") &&
-                    tile.any { it.viewId.endsWith(":id/title") && fold(it.text) == fold(title) }
-            }.singleOrNull()
+        resultTile = { root, wanted ->
+            val tiles = root.all { it.viewId.endsWith(":id/shelfItemRootLayout") }.mapNotNull { tile ->
+                val name = tile.all { it.viewId.endsWith(":id/title") }.singleOrNull()?.text ?: return@mapNotNull null
+                val year = tile.all { it.viewId.endsWith(":id/metadata") }.singleOrNull()?.let { yearIn(it.text) }
+                tile to Shown(name, year)
+            }
+            bestTile(tiles, wanted)
         },
         playButton = { root -> root.all { it.viewId.endsWith(":id/detailPageMainButtonOne") }.singleOrNull() },
-        pageTitle = { root -> root.all { it.viewId.endsWith(":id/detailLogoImage") }.singleOrNull()?.desc }
+        pageTitle = { root ->
+            root.all { it.viewId.endsWith(":id/detailLogoImage") }.singleOrNull()?.desc?.let { name ->
+                val year = root.all { it.viewId.endsWith(":id/detailPageMetadataRoot") }.singleOrNull()?.let { yearIn(it.desc) }
+                Shown(name, year)
+            }
+        }
     ) { root, name ->
         val onPicker = root.any { it.viewId.endsWith(":id/profilesContent") } &&
             root.any { it.text == "Who's watching?" }
@@ -142,18 +217,32 @@ object ProfilePickers {
 
     //
     // Autoplay: search results are standard_container_card_tile nodes whose
-    // description is "<title>, <badge>" ("The Boys, MOST LIKED") or just the
-    // title. A title's page has watch_now_button ("Episode 8 / Watch now").
+    // description is the title, optionally "(YYYY)" when names clash, then
+    // optionally ", <BADGE>" ("Road House (2024), MOST LIKED"). Rent/buy tiles
+    // read "<title>, Free trial or buy" and must not match. A title's page has
+    // header_title_logo (same naming) or header_title_text, the year in
+    // vod_original_air_date, and watch_now_button, for films and series
+    // alike, focused when the page opens. Prime lists some films twice: the
+    // plain "Road House" tile opened the 2024 film, same as "Road House
+    // (2024)" - which is why a film's page year is checked before Play.
 
     private fun primeVideo() = Picker(
         serviceId = "primevideo",
         packages = setOf("com.amazon.firebat", "com.amazon.avod", "com.amazon.avod.thirdpartyclient"),
-        resultTile = { root, title ->
-            root.all { it.viewId.endsWith(":id/standard_container_card_tile") && describesTitle(it.desc, title) }
-                .singleOrNull()
+        resultTile = { root, wanted ->
+            val tiles = root.all { it.viewId.endsWith(":id/standard_container_card_tile") }
+                .map { it to Shown(withoutBadge(it.desc), null) }
+            bestTile(tiles, wanted)
         },
         playButton = { root -> root.all { it.viewId.endsWith(":id/watch_now_button") }.singleOrNull() },
-        pageTitle = { root -> root.all { it.viewId.endsWith(":id/header_title_logo") }.singleOrNull()?.desc }
+        pageTitle = { root ->
+            // A logo when Prime has one ("Road House (2024)"), else plain text
+            // (the 1989-titled page showed header_title_text "Road House").
+            val name = root.all { it.viewId.endsWith(":id/header_title_logo") }.singleOrNull()?.desc?.takeIf { it.isNotBlank() }
+                ?: root.all { it.viewId.endsWith(":id/header_title_text") }.singleOrNull()?.text?.takeIf { it.isNotBlank() }
+            val year = root.all { it.viewId.endsWith(":id/vod_original_air_date") }.singleOrNull()?.let { yearIn(it.text) }
+            name?.let { Shown(withoutBadge(it), year) }
+        }
     ) { root, name ->
         if (!root.any { it.viewId.endsWith(":id/whos_watching_heading") }) return@Picker Outcome.NotPicker
 
@@ -165,23 +254,77 @@ object ProfilePickers {
         if (matches.size == 1) Outcome.Found(matches[0]) else Outcome.NoSuchProfile
     }
 
+    // ---- HBO Max (blind) -------------------------------------------------
+    //
+    // HBO Max exposes nothing to accessibility, so nothing here reads its
+    // screen; BlindPlay drives it with key presses and checks the result
+    // afterwards. Observed on the real TV (September 2026):
+    //  - https://play.max.com/search opens the search page with an on-screen
+    //    keyboard, and typed key events land in its box. A cold start took
+    //    ~14 s to get there, an app already running ~3 s.
+    //  - After typing, the highlight rests on the key of the last character
+    //    typed. Right from the keyboard's last column enters the first result.
+    //  - OK on a result opens its page with Watch / Continue highlighted, and
+    //    OK there plays.
+    //  - While playing, the media session names it: "When You're Lost in the
+    //    Darkness, The Last of Us" (episode, then show).
+
+    object Hbo {
+        const val SERVICE_ID = "hbomax"
+        const val SEARCH_LINK = "https://play.max.com/search"
+        /** The on-screen keyboard, row by row, six keys a row. */
+        private const val KEYBOARD = "abcdefghijklmnopqrstuvwxyz1234567890"
+        private const val COLUMNS = 6
+
+        /**
+         * What to type for [title]: only what the keyboard has. Accents are
+         * dropped, apostrophes closed up, anything else becomes a space:
+         * "Grey's Anatomy" -> "greys anatomy", "Pokémon" -> "pokemon".
+         */
+        fun searchText(title: String): String =
+            java.text.Normalizer.normalize(title, java.text.Normalizer.Form.NFD)
+                .replace(Regex("\\p{M}+"), "")
+                .lowercase(Locale.ROOT)
+                .replace(Regex("['’‘`]"), "")
+                .replace(Regex("[^a-z0-9]+"), " ")
+                .trim()
+                .take(60)
+                .trim()
+
+        /** Right presses from the key last typed to the first result; null if it isn't on the keyboard. */
+        fun rightsToFirstResult(typed: String): Int? {
+            val i = KEYBOARD.indexOf(typed.lastOrNull() ?: return null)
+            return if (i < 0) null else COLUMNS - i % COLUMNS
+        }
+    }
+
+    /**
+     * Whether a media session's description names [title]. HBO gives
+     * "episode, show" for a series, so the title's words, in order, anywhere
+     * will do. A film's description is its name alone ("Dune"), so a film must
+     * be exactly that: otherwise "Dune: Part Two" would pass for "Dune".
+     * Two films with the very same name still can't be told apart here.
+     */
+    fun namesTitle(description: String, title: String, isMovie: Boolean = false): Boolean {
+        val d = words(description)
+        val w = words(title)
+        if (w.isEmpty()) return false
+        return if (isMovie) d == w else " $d ".contains(" $w ")
+    }
+
     // ---- helpers ---------------------------------------------------------
 
     /**
-     * A tile describes a title if its text is the title, or the title then
-     * ", <BADGE>" - Prime's badges are capitals ("MOST LIKED", "SEASON
-     * FINALE"). Not "text before the first comma" (breaks "Love, Death &
-     * Robots"), and not "starts with title, " (then "Love" would open "Love,
-     * Death & Robots").
+     * Prime's tile text minus a trailing ", <BADGE>". Badges are capitals
+     * ("MOST LIKED", "SEASON FINALE"); anything else after the last comma is
+     * part of the name ("Love, Death & Robots") or a rent/buy note ("Free
+     * trial or buy"), which is left on so it doesn't match.
      */
-    fun describesTitle(desc: String, title: String): Boolean {
-        val d = fold(desc)
-        val t = fold(title)
-        if (t.isEmpty()) return false
-        if (d == t) return true
-        if (!d.startsWith("$t, ")) return false
-        val rest = desc.replace(SPACES, " ").trim().drop(t.length + 2)
-        return rest.any { it.isLetter() } && rest == rest.uppercase(Locale.ROOT)
+    fun withoutBadge(desc: String): String {
+        val i = desc.lastIndexOf(',')
+        if (i <= 0) return desc
+        val rest = desc.substring(i + 1).replace(SPACES, " ").trim()
+        return if (rest.any { it.isLetter() } && rest == rest.uppercase(Locale.ROOT)) desc.substring(0, i) else desc
     }
 
     /**

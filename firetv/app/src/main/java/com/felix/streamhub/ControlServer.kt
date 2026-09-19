@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import com.felix.streamhub.data.*
+import com.felix.streamhub.picker.BlindPlay
 import com.felix.streamhub.picker.ProfilePickerService
 import com.felix.streamhub.picker.ProfilePickers
 import fi.iki.elonen.NanoHTTPD
@@ -358,9 +359,21 @@ class ControlServer(
         // and only driven to playback where the screens can be read and keys
         // can be pressed.
         val typed = titleText?.takeIf { svc.search?.typeQuery == true }
-        val autoplay = titleText?.takeIf { ProfilePickerService.canAutoplay(serviceId) && TvKeys.helperRunning() }
+        // The year tells same-named titles apart ("Road House" 1989 / 2024).
+        // Never autoplay what isn't included in the subscription: on a rental,
+        // OK could land on Rent or Buy.
+        // HBO Max's screen can't be read: BlindPlay drives it blind and checks
+        // what the TV says is playing afterwards.
+        val blind = BlindPlay.canAutoplay(serviceId)
+        val autoplay = titleText?.takeIf { blind || (ProfilePickerService.canAutoplay(serviceId) && TvKeys.helperRunning()) }
+            ?.takeIf { item != null && includedOn(serviceId, Title.fromJson(item)) }
+            ?.let { ProfilePickers.Wanted(it, item?.optIntOrNull("year"), isMovie = item?.optString("mediaType") == "movie") }
         val relaunch = { main.post { AppLauncher.launch(context, serviceId, titleText, contentId) }; Unit }
-        val armed = ProfilePickerService.arm(serviceId, deviceId, store.profileNames(deviceId)[serviceId], typed, autoplay, relaunch)
+        val armed = if (blind && autoplay != null) {
+            BlindPlay.start(deviceId, autoplay)
+        } else {
+            ProfilePickerService.arm(serviceId, deviceId, store.profileNames(deviceId)[serviceId], typed, autoplay, relaunch)
+        }
 
         // Starting another app has to happen on the main thread.
         var result: AppLauncher.Result? = null
@@ -391,6 +404,12 @@ class ControlServer(
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", "Timed out starting ${svc.name}."))
         }
     }
+
+    /** Whether [t] is included in the subscription on [serviceId] here (not rent/buy). Unknown counts as no. */
+    private fun includedOn(serviceId: String, t: Title): Boolean =
+        t.id > 0 && runCatching {
+            runBlocking { tmdb.availability(t.mediaType, t.id) }.any { it.serviceId == serviceId && it.included }
+        }.getOrDefault(false)
 
     /** Progress of this phone's latest title, as the TV helper sees it. Another phone's is not shown. */
     private fun doAutoplayStatus(deviceId: String): Response {

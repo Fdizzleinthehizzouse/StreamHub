@@ -112,7 +112,7 @@ This one switch turns on three things:
   isn't running.
 
 Netflix and HBO Max can't use any of this: their apps don't let anything else
-read their screen. It acts only right after you send a title or tap a button,
+read their screen. (HBO Max autoplay uses the key helper alone.) It acts only right after you send a title or tap a button,
 only sees Disney+ and Prime Video's screens, and records nothing.
 
 Fire TV has no settings screen for this, so it's switched on from the computer,
@@ -150,15 +150,23 @@ one file, `picker/ProfilePickers.kt`.
 The phone's **Services** tab has a full remote. Apps aren't allowed to press
 keys on a Fire TV, and this TV also refuses ADB from apps on the TV itself, so
 a small helper does the pressing. It is started from the computer with ADB,
-and only StreamHub can use it (it checks who is asking and knows only those
+and only StreamHub can use it (it checks who is asking, and presses only those
 eight buttons).
 
 **Start it:** double-click `firetv\start-key-helper.bat` and type the TV's
-address. It prints `StreamHub key helper ready`, or `already running`.
+address. It prints `StreamHub key helper ready`.
 
 **After the TV restarts** (power cut, system update — not standby), the helper
 is gone. The phone's remote says so; run the script again. ADB debugging has
 to stay switched on for this.
+
+**After installing a new StreamHub**, run the script again too: a helper that
+was already running keeps the old version's abilities (HBO Max autoplay needs
+the new one). The script replaces it.
+
+Besides the eight buttons, it can type a title (letters, digits and spaces
+only, used for HBO Max's search) and report which app is in front and what is
+playing. It never runs anything it is sent.
 
 ---
 
@@ -173,7 +181,7 @@ Fire TV):
 |---|---|
 | **Prime Video** | **starts playing by itself** (with the TV helper and key helper on); otherwise its search results |
 | **Disney+** | **starts playing by itself**, in your profile (same); otherwise its search, filled in |
-| **HBO Max** | its search page. You type the title (the phone's remote pad works here) |
+| **HBO Max** | **starts playing by itself** (key helper on); otherwise its search page, where you type |
 | **Netflix** | its home screen. You find the title (the phone's remote pad works here) |
 
 "Starts by itself" means the TV finds the exact title, opens it and presses
@@ -181,6 +189,17 @@ Play, checking at every step that the highlight is on the right thing. Your
 phone shows each step and says "▶ Playing" only once the TV confirms it. If
 anything doesn't match — the title isn't in the results, a different title
 opened, your profile isn't on the picker — it stops and tells you where.
+
+It never starts something that isn't included in your subscription (a rental
+or purchase): for those you just get the service's page.
+
+**HBO Max is different.** Its screen can't be read, so the TV can't check
+anything *before* pressing. It types the title into HBO Max's search, opens
+the first result and presses Play, then checks what HBO Max says is playing.
+If that isn't your title it stops it straight away and tells you. A film must
+match by its exact name, so "Dune: Part Two" never passes for "Dune". The one
+thing it can't catch is two different films with the very same name: HBO
+Max's top result wins. Allow ~20 s (~35 s if HBO Max wasn't already open).
 
 ---
 

@@ -861,7 +861,10 @@ async function followAutoplay(service, title) {
     } catch {
       continue; // transient; keep following
     }
-    if (s.state === 'playing') return toast(`▶ Playing “${title}” on ${service}`);
+    // HBO Max sometimes can't say what it's playing; the TV then says so.
+    if (s.state === 'playing') {
+      return toast(s.message && s.message !== 'Playing' ? `▶ ${service}: ${s.message}` : `▶ Playing “${title}” on ${service}`);
+    }
     if (s.state === 'stopped') return toast(`${service}: ${s.message}`, true);
     if (s.state === 'done' || s.state === 'none') return;
     if (s.message && s.message !== last) {

@@ -24,8 +24,9 @@ import java.net.ServerSocket
  * It listens on 127.0.0.1:[PORT] and serves only StreamHub's uid, looked up
  * in /proc/net/tcp for the caller's connection. (A unix socket would give peer
  * credentials directly, but SELinux denies apps `connectto` a shell socket -
- * seen on the real TV.) Each request is one key name from [KEYS]; nothing a
- * caller sends is ever executed.
+ * seen on the real TV.) Each request is one key name from [KEYS], a short
+ * title to type ([TYPE], letters, digits and spaces only), or one of the
+ * read-only queries below; nothing a caller sends is ever executed.
  */
 object KeyServer {
 
@@ -67,11 +68,17 @@ object KeyServer {
                     // One connection may carry several requests, one per line.
                     while (true) {
                         val line = reader.readLine()?.trim() ?: break
-                        val reply = if (line == PLAYING) {
-                            playingPackages().joinToString(" ")
-                        } else {
-                            val code = KEYS[line]
-                            if (code != null && press(inject, code)) "ok" else "no"
+                        val reply = when {
+                            line == VERSION -> "$HELPER_VERSION"
+                            line == PLAYING -> playingPackages().joinToString(" ")
+                            line == NOW_PLAYING -> nowPlaying()
+                            line == FRONT -> frontFrom(dumpsys("window", "windows")) ?: ""
+                            line.startsWith("$RUNNING ") -> running(line.removePrefix("$RUNNING "))
+                            line.startsWith("$TYPE ") -> if (type(inject, line.removePrefix("$TYPE "))) "ok" else "no"
+                            else -> {
+                                val code = KEYS[line]
+                                if (code != null && press(inject, code)) "ok" else "no"
+                            }
                         }
                         out.write("$reply\n".toByteArray())
                         out.flush()
@@ -81,8 +88,30 @@ object KeyServer {
         }
     }
 
-    /** The one read-only query: which apps' media sessions are playing. */
+    /**
+     * Read-only: this helper's version. A helper started before StreamHub was
+     * updated keeps running the old code (and answers "no" to this), so
+     * StreamHub checks before relying on anything newer than key presses.
+     * 2 added typing, NOWPLAYING, FRONT and RUNNING.
+     */
+    const val VERSION = "VERSION"
+    const val HELPER_VERSION = 2
+
+    /** Read-only: which apps' media sessions are playing. */
     const val PLAYING = "PLAYING"
+    /** Read-only: the playing sessions with what they say is playing, as JSON. */
+    const val NOW_PLAYING = "NOWPLAYING"
+    /** Read-only: the package whose window has focus. */
+    const val FRONT = "FRONT"
+    /** Read-only: "RUNNING <package>" -> "yes" / "no". */
+    const val RUNNING = "RUNNING"
+    /**
+     * "TYPE <text>": types into whatever has focus, as a keyboard would. Only
+     * lower-case letters, digits and spaces - all HBO Max's search keyboard
+     * has - and a title's length, so it can't be used to enter anything else.
+     */
+    const val TYPE = "TYPE"
+    val TYPEABLE = Regex("^[a-z0-9 ]{1,60}$")
 
     /**
      * Apps whose media session is playing (state=3), from `dumpsys
@@ -90,10 +119,66 @@ object KeyServer {
      * notification listener. It's how "it's playing" is confirmed even for
      * Netflix and HBO Max, whose screens can't be read.
      */
-    private fun playingPackages(): List<String> {
-        val p = ProcessBuilder("dumpsys", "media_session").redirectErrorStream(true).start()
-        return playingFrom(p.inputStream.bufferedReader().readLines())
+    private fun playingPackages(): List<String> = playingFrom(dumpsys("media_session"))
+
+    private fun nowPlaying(): String {
+        val arr = org.json.JSONArray()
+        nowPlayingFrom(dumpsys("media_session")).forEach { (pkg, title) ->
+            arr.put(org.json.JSONObject().put("package", pkg).put("title", title))
+        }
+        return arr.toString()
     }
+
+    private fun dumpsys(vararg args: String): List<String> {
+        val p = ProcessBuilder(listOf("dumpsys") + args).redirectErrorStream(true).start()
+        return p.inputStream.bufferedReader().readLines()
+    }
+
+    private fun running(pkg: String): String {
+        if (!Regex("^[\\w.]{1,100}$").matches(pkg)) return "no"
+        val p = ProcessBuilder("pidof", pkg).redirectErrorStream(true).start()
+        return if (p.inputStream.bufferedReader().readText().trim().isNotEmpty()) "yes" else "no"
+    }
+
+    private fun type(inject: (InputEvent) -> Boolean, text: String): Boolean {
+        if (!TYPEABLE.matches(text)) return false
+        val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray()) ?: return false
+        // As the `input text` command does: fresh timestamps, from a keyboard.
+        val now = SystemClock.uptimeMillis()
+        return events.all { e -> inject(KeyEvent.changeTimeRepeat(e, now, 0).apply { source = InputDevice.SOURCE_KEYBOARD }) }
+    }
+
+    /**
+     * Pure, for testing: playing sessions and their description's first
+     * part, from blocks like
+     *   package=com.hbo.hbonow ... state=PlaybackState {state=3, ...
+     *   metadata:size=5, description=When You're Lost in the Darkness, The Last of Us, null
+     * The description is "title, subtitle, description" joined by ", ", and
+     * a title may itself hold commas, so the trailing ", null"s are dropped
+     * and the rest kept whole.
+     */
+    fun nowPlayingFrom(lines: List<String>): List<Pair<String, String>> {
+        val out = mutableListOf<Pair<String, String>>()
+        var pkg: String? = null
+        var playing = false
+        var desc = ""
+        fun flush() { pkg?.let { if (playing) out += it to desc } }
+        for (l in lines) {
+            val p = Regex("\\bpackage=([\\w.]+)").find(l)
+            if (p != null) { flush(); pkg = p.groupValues[1]; playing = false; desc = "" }
+            if (l.contains("state=PlaybackState {state=3,")) playing = true
+            Regex("metadata:size=\\d+, description=(.*)$").find(l)?.let {
+                // A film reads "Dune, , null": empty and null parts both go.
+                desc = it.groupValues[1].replace(Regex("(,\\s*(null)?)+$"), "").let { d -> if (d == "null") "" else d }
+            }
+        }
+        flush()
+        return out
+    }
+
+    /** Pure, for testing: "mCurrentFocus=Window{ee73170 u0 com.hbo.hbonow/...}" -> the package. */
+    fun frontFrom(lines: List<String>): String? =
+        lines.firstNotNullOfOrNull { Regex("mCurrentFocus=Window\\{\\S+ \\S+ ([\\w.]+)/").find(it)?.groupValues?.get(1) }
 
     /** Pure, for testing: `package=X` followed (within its block) by `state=PlaybackState {state=3,`. */
     fun playingFrom(lines: List<String>): List<String> {

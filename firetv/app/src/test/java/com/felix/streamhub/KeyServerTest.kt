@@ -2,7 +2,9 @@ package com.felix.streamhub
 
 import com.felix.streamhub.keys.KeyServer
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** The helper's only gate: who is on the other end of a connection. */
@@ -52,6 +54,55 @@ class KeyServerTest {
         )
         assertEquals(listOf("com.amazon.firebat"), KeyServer.playingFrom(dump))
         assertEquals(emptyList<String>(), KeyServer.playingFrom(dump.drop(2)))
+    }
+
+    @Test
+    fun whatIsPlayingIsReadWithItsTitle() {
+        // As printed on the real TV while HBO Max played The Last of Us.
+        val dump = listOf(
+            "      package=com.hbo.hbonow",
+            "      state=PlaybackState {state=3, position=33508, buffered position=80080, speed=1.0}",
+            "      metadata:size=5, description=When You're Lost in the Darkness, The Last of Us, null",
+            "      package=com.netflix.ninja",
+            "      state=PlaybackState {state=1, position=0, buffered position=0, speed=1.0}",
+            "      metadata:size=0, description=null",
+            "      package=com.amazon.firebat",
+            "      state=PlaybackState {state=3, position=0}",
+            "      metadata:size=8, description=Road House (2024), null, null",
+            "      package=com.hbo.max.film",
+            "      state=PlaybackState {state=3, position=0}",
+            "      metadata:size=5, description=Dune, , null",
+            "      package=com.amazon.vizzini",
+            "      metadata:size=1, description=null, null, null"
+        )
+        assertEquals(
+            listOf(
+                "com.hbo.hbonow" to "When You're Lost in the Darkness, The Last of Us",
+                "com.amazon.firebat" to "Road House (2024)",
+                "com.hbo.max.film" to "Dune" // as HBO Max printed a film: "Dune, , null"
+            ),
+            KeyServer.nowPlayingFrom(dump)
+        )
+    }
+
+    @Test
+    fun theAppInFrontIsReadFromTheWindowDump() {
+        val dump = listOf(
+            "  mInputMethodTarget=null",
+            "  mCurrentFocus=Window{ee73170 u0 com.hbo.hbonow/com.wbd.beam.BeamActivity}",
+            "  mFocusedApp=AppWindowToken{66d7dff token=Token{79a711e ActivityRecord{4ead159 u0 com.amazon.firebat/.X t951}}}"
+        )
+        assertEquals("com.hbo.hbonow", KeyServer.frontFrom(dump))
+        assertNull(KeyServer.frontFrom(listOf("  mCurrentFocus=null")))
+    }
+
+    @Test
+    fun onlyShortPlainTitlesCanBeTyped() {
+        assertTrue(KeyServer.TYPEABLE.matches("house of the dragon"))
+        assertTrue(KeyServer.TYPEABLE.matches("1917"))
+        for (bad in listOf("", "House", "a;b", "a\nb", "rm -rf", "x".repeat(61), "é")) {
+            assertFalse(bad, KeyServer.TYPEABLE.matches(bad))
+        }
     }
 
     @Test

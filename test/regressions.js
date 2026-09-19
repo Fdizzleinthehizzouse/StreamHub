@@ -336,6 +336,15 @@ process.exit(0);
   // Against real picker dumps: never clicks "New", never guesses a name.
   await check('profile picking only clicks an exact, unique match on the real screens', () => jvmTest('ProfilePickersTest'));
 
+  // Found on the real TV: Disney+ autoplay stalled on "The Mandalorian"
+  // because "Disney Gallery / Star Wars: The Mandalorian" counted as just as sure.
+  await check('an exact title beats a longer one that merely contains it', () =>
+    jvmTest('ProfilePickersTest.anExactNameBeatsALongerOneThatContainsIt'));
+
+  // HBO Max is driven blind; only the media session proves what started.
+  await check('HBO Max: only the wanted title counts as playing ("Dune: Part Two" is not "Dune")', () =>
+    jvmTest('ProfilePickersTest.whatIsPlayingMustNameTheTitle'));
+
   const failed = checks.filter((c) => !c).length;
   console.log(`\n${checks.length - failed}/${checks.length} checks passed`);
   process.exit(failed ? 1 : 0);

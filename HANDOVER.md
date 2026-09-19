@@ -61,6 +61,38 @@ Gotchas that cost time:
 - Git Bash mangles `/sdcard/...` in `adb pull`: use `//sdcard/...`.
 - `dumps/tree.js file.xml` prints a uiautomator dump as an indented tree.
 
+## Update — evening of 2026-09-19: all three readable/driveable services autoplay
+
+Verified live, each from a cold start: Prime Video (Road House 2024, ~21 s),
+Disney+ (The Mandalorian, ~24 s, profile picked on the way), HBO Max (House of
+the Dragon ~33 s cold; Dune ~18 s warm).
+
+- **HBO Max autoplay** (`picker/BlindPlay.kt`, rules in the HBO section of
+  `ProfilePickers.kt`). Found: `play.max.com/search` + typed key events fill
+  its search box; the highlight then rests on the key last typed, and Right
+  from the keyboard's last column enters the first result; OK → title page with
+  Watch focused; OK → plays. Cold start ~14 s to a usable page, warm ~3 s.
+  Verification: media session description (`"<episode>, <show>"`, or a film's
+  name alone). Films must match exactly; wrong title → Back + honest message.
+  Wikidata HBO ids were not used: only ~719 items have P8298.
+- **Key helper v2**: `TYPE <a-z0-9 >`, `NOWPLAYING` (JSON), `FRONT`,
+  `RUNNING <pkg>`, `VERSION`. An old helper survives an app reinstall and keeps
+  old code, so `start-key-helper.bat` now `pkill`s it first; StreamHub checks
+  `VERSION` ≥ 2 before HBO autoplay.
+- **Stale accessibility tree** (two symptoms, both fixed): Prime's title page
+  opens over its hidden search results in the same window → nodes not
+  `isVisibleToUser` are skipped (as `uiautomator dump` does). Disney+ swaps
+  screens in one window and the service's node cache kept showing the old
+  profile screen → every child is `refresh()`ed on read (~200 ms per full
+  read on this TV). A `uiautomator dump` "fixes" the cache, which hides the bug
+  while debugging.
+- **Matching**: an exact title beats a longer one containing it ("The
+  Mandalorian" vs "Disney Gallery / Star Wars: The Mandalorian").
+- **Never autoplay rentals**: TMDB availability must list the title as
+  included on that service (Road House 1989 is rent-only on Prime here).
+- Every armed job logs `looking (...) ids=...` every 5 s under
+  `StreamHubPicker`: enough to diagnose a redesign from logcat.
+
 ## Update — later on 2026-09-19: done since the notes below
 
 - **Full remote on the phone** (arrows, OK, Back, Home, play/pause). The in-app

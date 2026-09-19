@@ -37,7 +37,7 @@ Do not "fix" these — they were investigated, most of them on the real TV.
    |---|---|---|
    | Prime Video | `https://app.primevideo.com/search?phrase=…` | search results for the title |
    | Disney+ | `disneyplus://www.disneyplus.com/search` | empty search page; the accessibility helper types the title into `searchEditText` |
-   | HBO Max | `https://play.max.com/search` | empty search page; the user types (screen not readable) |
+   | HBO Max | `https://play.max.com/search` | empty search page; `BlindPlay` types the title via the key helper (screen not readable) |
    | Netflix | app home only | every search/title/watch link tried lands on home |
 
 3. **Exact-title links need each service's content id.** TMDB does not expose
@@ -46,7 +46,9 @@ Do not "fix" these — they were investigated, most of them on the real TV.
 5. **Netflix and HBO Max cannot be read or clicked.** Both draw their whole UI on
    one surface: no accessibility nodes. Netflix also blocks screenshots. The only
    signal from them is Android's media session (`dumpsys media_session`,
-   `state=3` = playing).
+   `state=3` = playing, and `description=` names what plays). HBO Max autoplay
+   (`picker/BlindPlay.kt`) is therefore blind key presses, verified afterwards:
+   the media session must name the title, else Back and report.
 6. **Accessibility clicks are not remote presses.** Prime Video ignored
    `ACTION_CLICK` on its highlighted tile (reported as delivered). Real key
    events work — see "Key presses" in HANDOVER.md.
@@ -64,6 +66,7 @@ firetv/                  THE PRODUCT — Android app, Kotlin
       picker/
         ProfilePickers.kt  ALL screen recognition, one section per service
         ProfilePickerService.kt  accessibility service: profile pick, Disney+ typing, Back/Home
+        BlindPlay.kt       HBO Max autoplay: type, step, OK, verify via media session
       data/                Tmdb, Omdb, Store, Recommender, Models, Services, Genres, Http
     assets/remote/         THE PHONE UI (html/css/js)
     res/xml/profile_picker_service.xml   accessibility config (package-limited)
