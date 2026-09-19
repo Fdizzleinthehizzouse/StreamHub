@@ -570,8 +570,26 @@ function renderServices(host) {
           })
         );
       })
-    )
+    ),
+    el('h2', { class: 'page-title', style: { fontSize: '16px', marginTop: '26px' }, text: 'On the TV' }),
+    el(
+      'div',
+      { class: 'btn-row', style: { padding: '0 14px' } },
+      el('button', { class: 'btn remote-key', 'data-key': 'back', text: '‹ Back', onClick: () => pressTvKey('back') }),
+      el('button', { class: 'btn remote-key', 'data-key': 'home', text: '⌂ Home', onClick: () => pressTvKey('home') })
+    ),
+    // Arrows and OK aren't possible from an app; say so rather than offer them.
+    el('p', { class: 'page-sub', text: 'For moving around and pressing OK, use the TV remote.' })
   );
+}
+
+async function pressTvKey(key) {
+  try {
+    const r = await api('/api/remote', { method: 'POST', body: { key } });
+    if (r.ok === false) toast(r.error || 'The TV didn’t take that.', true);
+  } catch (err) {
+    toast(err.message, true);
+  }
 }
 
 function renderWatchlist(host) {

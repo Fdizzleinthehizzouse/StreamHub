@@ -98,6 +98,11 @@ const server = http.createServer(async (req, res) => {
     if (url.searchParams.get('id') !== 'scifi') return send(400, { error: 'Unknown genre.' });
     return send(200, { genre: 'Sci-fi & fantasy', results: [{ ...TITLES[1], availableOn: [{ serviceId: 'hbomax', kind: 'included' }] }] });
   }
+  if (p === '/api/remote') {
+    if (body.key === 'back') return send(200, { ok: true });
+    // As on a TV where the one-time setup hasn't been done.
+    return send(200, { ok: false, error: 'The TV needs its one-time setup for this (see the README).' });
+  }
   if (p === '/api/home') {
     if (!hasKey) return send(200, { rows: [], needsKey: true });
     return send(200, { rows: [{ id: 'foryou', title: 'Picks for you', subtitle: 'From what you watch', items: TITLES }] });
@@ -225,6 +230,16 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(300);
   check('all four services are listed', (await page.locator('.svc-card').count()) === 4);
   check('a service missing from the TV says so', (await page.locator('.svc-card').nth(2).textContent()).includes('Not installed'));
+
+  calls.length = 0;
+  await page.locator('.remote-key[data-key="back"]').click();
+  await page.waitForTimeout(300);
+  const back = calls.find((c) => c.path === '/api/remote');
+  check('the phone can press Back on the TV', back && back.body.key === 'back', JSON.stringify(back && back.body));
+  await page.locator('.remote-key[data-key="home"]').click();
+  await page.waitForTimeout(400);
+  check('a press the TV could not do is reported, not faked', /one-time setup/.test(await page.locator('#toast').textContent()));
+  check('no OK or arrow buttons are offered', (await page.locator('.remote-key').count()) === 2);
 
   calls.length = 0;
   await page.locator('.svc-card').first().click();

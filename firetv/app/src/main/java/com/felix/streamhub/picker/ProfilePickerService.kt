@@ -155,6 +155,24 @@ class ProfilePickerService : AccessibilityService() {
         val isRunning: Boolean get() = running != null
 
         /**
+         * The phone's Back / Home buttons - only ever on a tap there.
+         *
+         * No OK and no arrows. An app cannot send key presses, and on a real
+         * Fire TV an accessibility click on the highlighted item in Prime Video
+         * was reported as delivered but ignored (twice, on different items),
+         * so OK would have claimed success for nothing.
+         * @return null if the service is not enabled on this TV.
+         */
+        fun remote(key: String): Boolean? {
+            val s = running ?: return null
+            return when (key) {
+                "back" -> s.performGlobalAction(GLOBAL_ACTION_BACK)
+                "home" -> s.performGlobalAction(GLOBAL_ACTION_HOME)
+                else -> false
+            }
+        }
+
+        /**
          * Watch for [serviceId]'s profile picker and/or search box. Every play
          * request replaces the previous job, so a stale one never acts on the
          * next app. @return false if there is nothing this service can do.

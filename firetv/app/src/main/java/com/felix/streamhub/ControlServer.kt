@@ -103,6 +103,7 @@ class ControlServer(
             uri == "/api/pinned" -> doToggle(session, deviceId, pinned = true)
             uri == "/api/play" -> doPlay(session, deviceId)
             uri == "/api/profiles" -> doProfiles(session, deviceId)
+            uri == "/api/remote" -> doRemote(session)
             uri == "/api/settings" -> doSettings(session)
             else -> json(Response.Status.NOT_FOUND, JSONObject().put("error", "Not found"))
         }
@@ -376,6 +377,22 @@ class ControlServer(
             null ->
                 json(Response.Status.OK, JSONObject().put("ok", false).put("error", "Timed out starting ${svc.name}."))
         }
+    }
+
+    /** Back / Home from the phone. Answers honestly when it could not press. */
+    private fun doRemote(session: IHTTPSession): Response {
+        if (session.method != Method.POST) {
+            return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "POST only."))
+        }
+        val key = readBody(session).optString("key")
+        if (key !in setOf("back", "home")) {
+            return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown button."))
+        }
+        AppLauncher.wakeScreen(context)
+        val pressed = ProfilePickerService.remote(key)
+            ?: return json(Response.Status.OK, JSONObject().put("ok", false).put("error", "The TV needs its one-time setup for this (see the README)."))
+        if (!pressed) return json(Response.Status.OK, JSONObject().put("ok", false).put("error", "The TV didn’t take that."))
+        return json(Response.Status.OK, JSONObject().put("ok", true))
     }
 
     /**

@@ -95,18 +95,24 @@ Tip: use your phone browser's **Add to Home Screen** so it's one tap away.
 
 ---
 
-## Step 4 (optional) — let the TV pick your profile
+## Step 4 (optional) — the TV helper
 
-After pairing, your phone asks which **Disney+** and **Prime Video** profile is
-yours. With this switched on, when you send a title the TV clicks your profile
-on the "Who's watching?" screen for you.
+This one switch turns on three things:
 
-- **Netflix and HBO Max can't do this.** Their apps don't let anything else read
-  their screen. (On a real Fire TV, HBO Max skipped its picker anyway.)
-- It only clicks when it can see the picker **and** finds your exact name on it.
-  Otherwise it does nothing and leaves you on the picker.
-- Only acts for 90 seconds after StreamHub opens Disney+ or Prime Video, and
-  can't see any other app. Nothing is recorded.
+- **Your profile, picked for you.** After pairing, your phone asks which
+  **Disney+** and **Prime Video** profile is yours. When you send a title, the
+  TV clicks it on the "Who's watching?" screen. It only clicks when it can see
+  the picker **and** finds your exact name on it. Otherwise it does nothing and
+  leaves you on the picker. Tested live on Disney+. On Prime Video it has
+  only been checked against a saved copy of its picker screen, because Prime
+  kept skipping the picker during testing.
+- **Disney+ search filled in.** Disney+ opens its search page empty; the
+  helper types the title in.
+- **Back and Home** buttons on the phone (Services tab).
+
+Netflix and HBO Max can't use any of this: their apps don't let anything else
+read their screen. It acts only right after you send a title or tap a button,
+only sees Disney+ and Prime Video's screens, and records nothing.
 
 Fire TV has no settings screen for this, so it's switched on from the computer,
 once. First check nothing else is using it:
@@ -140,13 +146,21 @@ one file, `picker/ProfilePickers.kt`.
 
 ## Using it
 
-Browse or search on your phone. Tap a film. It tells you which of your four
-services has it. Tap that, and the TV opens Netflix (or whichever) at that film.
+Browse, search or pick a genre on your phone. Everything shown is on at least
+one of your four services, tagged with which. Tap a film, tap a service, and
+the TV opens it. How close it gets depends on the service (tested on a real
+Fire TV):
 
-**One thing to expect:** you'll still press OK once on your TV remote to
-actually start playing. Netflix and Disney+ don't publish the information an
-outside app would need to press play for you — nobody outside their own
-partnerships can do it. So it's phone-tap, then one press on the remote.
+| Service | What the TV shows |
+|---|---|
+| **Prime Video** | its search results for that film |
+| **Disney+** | its search results for that film (with the TV helper on; otherwise its search page, and you type) |
+| **HBO Max** | its search page. You type the title with the remote |
+| **Netflix** | its home screen. You find the title yourself |
+
+Your phone tells you which of these happened. You then pick the title and press
+play with the TV remote. None of the services publish what an outside app
+would need to start a film directly.
 
 ---
 
@@ -172,29 +186,23 @@ stays paired; you don't have to redo anything.
 
 ## Being straight with you about what's tested
 
-- Every line of the TV app has been through a real Kotlin compiler with no
-  errors, using a harness I proved works by deliberately breaking things twelve
-  different ways and confirming each break was caught.
-- The phone side is tested end to end in a real browser against a stand-in for
-  the TV — 28 checks covering pairing, wrong codes, settings, search, sending a
-  film, a service that isn't installed, and the TV being switched off.
-- Two independent reviews went through the rewrite line by line and found 20
-  real defects, all since fixed. The worst would have meant only the *first*
-  film you picked ever played, and another would have opened Netflix's home
-  screen instead of your film.
-- **On a real Fire TV** (Fire OS 7.7.1.4): it installs, all four services are
-  detected, and it opens HBO Max and Prime Video, including as the second launch
-  of the evening. That test found a real bug: HBO Max read as "not installed".
-  It's fixed now. Sending a *title* (universal search) and browsing from a
-  phone have not been tried on the TV yet.
-
-### The one I'd watch for
-
-Android normally stops an app from opening other apps while it's in the
-background. That would have meant only your first pick of the evening worked.
-The app now tells Android it's built for an older version, which exempts it —
-a normal thing to do for an app you install yourself. If you find the second
-film of the evening doesn't open, that's the cause, and tell me.
+- **On a real Fire TV** (Fire OS 7.7.1.4), driven over wifi the same way a
+  phone does it:
+  - it installs, finds all four services, and opens them, including as the
+    second launch of the evening
+  - sending a title does what the table above says, on each service
+  - Disney+ picks the right profile and fills in its search
+  - search and genres show real, correctly tagged results for Belgium
+  - Back and Home work, and launching wakes the TV from its screensaver
+- That testing found and fixed real bugs that stand-ins could never have
+  shown. The biggest: sending a title used to open the **Silk web browser**
+  (that's where the sportzx.org page came from), while the phone said it
+  worked.
+- Automated checks: Kotlin tests that run the real TV server and read real
+  saved screens from your TV (`firetv/app/src/test`), plus 40+ checks of the
+  phone page in a real browser.
+- **Not yet tried with a real phone's browser** — everything above was driven
+  from a computer on the same wifi.
 
 ---
 
