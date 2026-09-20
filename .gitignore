@@ -18,3 +18,9 @@ dumps/
 
 # personal Claude Code settings
 .claude/settings.local.json
+
+# release signing - losing these means no future update can install over
+# an installed StreamHub. Keystore lives outside the repo; see INSTALL.md.
+firetv/keystore.properties
+*.jks
+*.keystore

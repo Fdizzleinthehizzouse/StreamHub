@@ -3,6 +3,17 @@
 One window for Netflix, Disney+, HBO Max and Prime Video — with a shared
 watchlist, cross-service search, full metadata and recommendations.
 
+> **Looking for the Fire TV app?** That's the current product: your phone
+> browses, the TV plays. Install it from the sofa with
+> **[INSTALL.md](INSTALL.md)** — no computer, no commands. The signed app file
+> is at
+> <https://github.com/Fdizzleinthehizzouse/StreamHub/releases/latest>, and
+> [`firetv/README.md`](firetv/README.md) covers building it and the two extras
+> that do need a PC.
+>
+> The Windows desktop app described below came first and still works, but the
+> phone-and-TV flow has moved past it.
+
 ---
 
 ## Setup (about 3 minutes)

@@ -82,6 +82,11 @@ firetv/                  THE PRODUCT — Android app, Kotlin
   app/src/test/            JVM tests: real ControlServer over HTTP, real screen dumps
     resources/pickers/     uiautomator dumps from the real TV, names replaced
 
+INSTALL.md               Plain-English sideloading guide for the shipped APK.
+                         No terminal commands in it by design; the one step
+                         that needs a PC (the accessibility service) is called
+                         out as such and points at firetv/README.md.
+
 src/, installer/         Legacy Electron desktop app. Not part of the phone→TV flow.
 test/                    Node suites; regressions.js also runs the JVM tests
 dumps/                   (git-ignored) raw TV screen dumps — contain real profile names
@@ -120,6 +125,21 @@ cd firetv && ./gradlew assembleDebug :app:testDebugUnitTest
 - Pairing tokens go in the **header** (`x-streamhub-token`), never the body. No
   token, device id or API key in any response body (tested).
 - Plain language when reporting to Félix; he is not a developer.
+
+## Releasing
+
+`./gradlew assembleRelease` → `firetv/app/build/outputs/apk/release/app-release.apk`,
+attached to each GitHub release as `StreamHub.apk` so that
+`releases/latest/download/StreamHub.apk` is a stable address to type into
+Downloader on the TV. Bump `versionCode` (and `versionName`) in
+`app/build.gradle.kts` for every release, or the TV refuses the update.
+
+Signed with a key outside the repo, at `C:\Users\Felix\StreamHub-signing\`,
+found via the git-ignored `firetv/keystore.properties`. **Lose it and no
+future version can update an installed StreamHub** — users would have to
+uninstall, losing their watchlist. The release build fails with an explanation
+rather than emitting an unsigned APK. Lint's `ExpiredTargetSdkVersion` is
+disabled because `targetSdk = 28` is load-bearing (see below).
 
 ## Known risks
 

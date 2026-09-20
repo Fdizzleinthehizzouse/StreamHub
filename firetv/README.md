@@ -20,6 +20,19 @@ recent *sticks* have the newer system.
 
 ---
 
+## Just want it installed?
+
+You don't need this page or a computer. There's a ready-made, signed app file
+on the releases page, and **[INSTALL.md](../INSTALL.md)** walks through putting
+it on the TV from the sofa, with no commands at all:
+
+<https://github.com/Fdizzleinthehizzouse/StreamHub/releases/latest>
+
+The rest of this page is for building it yourself, and for the two extras
+(Steps 4 and 5) that do need a computer whichever way you installed.
+
+---
+
 ## What you're going to do
 
 Three steps. The first one is the only fiddly bit, and you only ever do it once.
@@ -32,8 +45,38 @@ Three steps. The first one is the only fiddly bit, and you only ever do it once.
 
 ## Step 1 — make the app file
 
-The code needs turning into something a TV can install. That's what Android
-Studio does. It's free and it's a big download, but you only need it once.
+Skip this if you downloaded the ready-made file above.
+
+### The quick way, if you have the signing key
+
+From the `firetv` folder:
+
+```
+./gradlew assembleRelease
+```
+
+The finished file lands at:
+
+```
+firetv/app/build/outputs/apk/release/app-release.apk
+```
+
+That is the file to hand to someone, and the one attached to each release
+(renamed `StreamHub.apk` there). It is signed, so a Fire TV will install it and
+later versions will install over it.
+
+It needs a JDK between 17 and 21 on `JAVA_HOME` — Gradle 8.7 can't run on the
+Java 25 that current Android Studio bundles, which is also why Android Studio
+can't open this project until Gradle and AGP are upgraded.
+
+**It will stop and tell you if `firetv/keystore.properties` is missing**, rather
+than hand you an unsigned file that no TV will install. See "The signing key"
+below.
+
+### The Android Studio way
+
+Gives you an unsigned debug file, which installs fine but can never be updated
+over by a real release. Use it for testing, not for giving to anyone.
 
 1. Download **Android Studio** from <https://developer.android.com/studio> and
    install it. Accept the defaults.
@@ -45,9 +88,38 @@ Studio does. It's free and it's a big download, but you only need it once.
    succeeded, with a **locate** link. Click it to find the file. It's called
    `app-debug.apk`.
 
-**If it shows errors instead:** copy the red text and send it to me. That's a
-normal part of this and it's usually a one-line fix. I can't test this step
-myself, so you may well be the first to run it.
+---
+
+## The signing key
+
+Android identifies an app by who signed it. An update signed with a different
+key **will not install** over an installed StreamHub — the only way past that is
+to uninstall first, which erases the watchlist and pinned titles.
+
+So the key that signed the release matters, and there is exactly one copy of it:
+
+```
+C:\Users\Felix\StreamHub-signing\
+    streamhub-release.jks    the key itself
+    password.txt             its password, alias, and this warning again
+```
+
+**Back that folder up somewhere that isn't this computer** — a password manager
+as an attachment, a USB stick in a drawer, a private cloud folder. If it's lost,
+no future version of StreamHub can ever update an installed one, for anyone.
+
+It is deliberately outside the repo, and `*.jks` is git-ignored, so it can't be
+committed by accident. The build finds it through `firetv/keystore.properties`
+(also git-ignored) — if you move the key, edit that file's `storeFile` line.
+Use forward slashes there: a `.properties` file reads `\` as an escape
+character, so a Windows path with backslashes silently turns to nonsense.
+
+**Starting fresh on another machine** (no key yet): create one with
+`keytool -genkeypair -v -keystore streamhub-release.jks -storetype PKCS12
+-alias streamhub -keyalg RSA -keysize 4096 -validity 10000`, then write a
+`firetv/keystore.properties` with `storeFile`, `storePassword`, `keyAlias` and
+`keyPassword`. Anything you build with it is a *different app* as far as every
+already-installed copy is concerned.
 
 ---
 
@@ -67,8 +139,13 @@ It looks like `192.168.1.42`.
 
 ```
 adb connect 192.168.1.42
-adb install app-debug.apk
+adb install app-release.apk
 ```
+
+(`app-debug.apk` if you built it the Android Studio way. Going the other
+direction later — release over debug, or debug over release — fails, because
+they're signed differently; `adb uninstall com.felix.streamhub` first, which
+erases the watchlist.)
 
 (Use your TV's actual number. `adb` came with Android Studio.) Look at the TV
 after the first command — it'll ask permission. Say yes.

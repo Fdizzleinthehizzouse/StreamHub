@@ -1,6 +1,37 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+// Release signing. The keystore is deliberately outside the repo (and .jks is
+// git-ignored): if it ever leaked, anyone could publish an "update" to
+// StreamHub. keystore.properties says where it is - see INSTALL.md.
+//
+// Losing the keystore is unrecoverable. Android identifies an app by its
+// signature, so an APK signed with a different key will not install over an
+// installed StreamHub; the only way back is uninstall, which erases the
+// watchlist. That is why the build refuses to produce an unsigned release
+// rather than handing over an APK that looks fine and installs nowhere.
+val keystorePropsFile = rootProject.file("keystore.properties")
+val keystoreProps = Properties().apply {
+    if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
+}
+val hasReleaseKey = keystorePropsFile.exists()
+
+gradle.taskGraph.whenReady {
+    val wantsRelease = allTasks.any {
+        it.name == "assembleRelease" || it.name == "bundleRelease" || it.name == "installRelease"
+    }
+    if (wantsRelease && !hasReleaseKey) {
+        throw GradleException(
+            "No signing key: firetv/keystore.properties is missing, so a release " +
+            "APK would come out unsigned and no Fire TV would install it. " +
+            "Create the key and that file as described in INSTALL.md " +
+            "(\"Rebuilding the app yourself\"), then run this again."
+        )
+    }
 }
 
 android {
@@ -22,8 +53,25 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        if (hasReleaseKey) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+                // v1 as well as v2/v3: Fire OS 7 is API 28, which verifies v2,
+                // but the older Fire TV hardware minSdk 23 keeps in scope
+                // only knows v1.
+                enableV1Signing = true
+                enableV2Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release")
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
@@ -43,6 +91,16 @@ android {
 
     buildFeatures {
         viewBinding = false
+    }
+
+    lint {
+        // targetSdk 28 is deliberate (see defaultConfig above), and lint fails
+        // the release build over it by default. ExpiredTargetSdkVersion is a
+        // Google Play publishing requirement; StreamHub is sideloaded onto one
+        // household's Fire TV and is never submitted to a store. Raising the
+        // target to silence this would break launching a service after the
+        // first one of the session, which is the whole product.
+        disable += "ExpiredTargetSdkVersion"
     }
 
     // The JVM tests start the real ControlServer. Android calls it makes along
