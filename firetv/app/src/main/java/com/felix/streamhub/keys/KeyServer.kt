@@ -40,7 +40,19 @@ object KeyServer {
         "OK" to KeyEvent.KEYCODE_DPAD_CENTER,
         "BACK" to KeyEvent.KEYCODE_BACK,
         "HOME" to KeyEvent.KEYCODE_HOME,
-        "PLAYPAUSE" to KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE
+        "PLAYPAUSE" to KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
+        // Sound and transport, for the phone's remote.
+        "VOLUMEUP" to KeyEvent.KEYCODE_VOLUME_UP,
+        "VOLUMEDOWN" to KeyEvent.KEYCODE_VOLUME_DOWN,
+        "MUTE" to KeyEvent.KEYCODE_VOLUME_MUTE,
+        "FORWARD" to KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+        "REWIND" to KeyEvent.KEYCODE_MEDIA_REWIND,
+        "NEXT" to KeyEvent.KEYCODE_MEDIA_NEXT,
+        "PREVIOUS" to KeyEvent.KEYCODE_MEDIA_PREVIOUS,
+        // The TV stays on the network while asleep, so the phone can wake it.
+        // Separate keys, not one POWER toggle, so each press is predictable.
+        "WAKE" to KeyEvent.KEYCODE_WAKEUP,
+        "SLEEP" to KeyEvent.KEYCODE_SLEEP
     )
 
     @JvmStatic
@@ -94,10 +106,10 @@ object KeyServer {
      * updated keeps running the old code (and answers "no" to this), so
      * StreamHub checks before relying on anything newer than key presses.
      * 2 added typing, NOWPLAYING, FRONT and RUNNING. 3 types slowly and adds
-     * STOPAPP (Netflix only).
+     * STOPAPP (Netflix only). 4 adds volume, transport, wake and sleep keys.
      */
     const val VERSION = "VERSION"
-    const val HELPER_VERSION = 3
+    const val HELPER_VERSION = 4
     /** "STOPAPP <package>": force-stops a package in [STOPPABLE]. */
     const val STOP_APP = "STOPAPP"
 

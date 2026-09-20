@@ -471,19 +471,30 @@ class ControlServer(
         }
         val key = TvKeys.Key.of(readBody(session).optString("key"))
             ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown button."))
-        AppLauncher.wakeScreen(context)
+        // Every button wakes the screen first - except the one whose whole job
+        // is to put the TV to sleep.
+        if (key != TvKeys.Key.SLEEP) AppLauncher.wakeScreen(context)
 
         fun ok() = json(Response.Status.OK, JSONObject().put("ok", true))
         fun fail(why: String) = json(Response.Status.OK, JSONObject().put("ok", false).put("error", why))
 
         return when (val r = TvKeys.press(key)) {
             TvKeys.Result.Pressed -> ok()
-            is TvKeys.Result.Unavailable -> {
-                val fallback = if (key == TvKeys.Key.BACK || key == TvKeys.Key.HOME) ProfilePickerService.remote(key.name.lowercase()) else null
-                if (fallback == true) ok() else fail(r.reason)
+            is TvKeys.Result.Unavailable -> when {
+                key == TvKeys.Key.BACK || key == TvKeys.Key.HOME ->
+                    if (ProfilePickerService.remote(key.name.lowercase()) == true) ok() else fail(r.reason)
+                // Waking needs no helper: the app holds a wake lock itself.
+                // Only reported as done once the TV says it is awake.
+                key == TvKeys.Key.WAKE ->
+                    if (isAwake()) ok() else fail("The TV didn’t wake up.")
+                else -> fail(r.reason)
             }
         }
     }
+
+    private fun isAwake(): Boolean = runCatching {
+        (context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager).isInteractive
+    }.getOrDefault(false)
 
     /**
      * Which profile is this phone's on each service that can be auto-picked.

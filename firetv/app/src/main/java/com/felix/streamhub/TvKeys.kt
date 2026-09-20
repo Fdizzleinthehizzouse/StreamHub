@@ -16,7 +16,9 @@ import java.net.Socket
  */
 object TvKeys {
 
-    enum class Key { UP, DOWN, LEFT, RIGHT, OK, BACK, HOME, PLAYPAUSE;
+    enum class Key {
+        UP, DOWN, LEFT, RIGHT, OK, BACK, HOME, PLAYPAUSE,
+        VOLUMEUP, VOLUMEDOWN, MUTE, FORWARD, REWIND, NEXT, PREVIOUS, WAKE, SLEEP;
         companion object {
             fun of(name: String?): Key? = values().firstOrNull { it.name.equals(name, ignoreCase = true) }
         }

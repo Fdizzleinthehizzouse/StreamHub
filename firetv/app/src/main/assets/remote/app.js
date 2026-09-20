@@ -719,18 +719,20 @@ function renderServices(host) {
   );
 }
 
-/** A TV remote: arrows around OK, then Back / Home / Play-pause. */
+/** A TV remote: power, arrows around OK, then navigation, transport, volume. */
 function remotePad() {
-  const key = (k, label, extra = '') =>
-    el('button', { class: `remote-key ${extra}`.trim(), 'data-key': k, 'aria-label': k, text: label, onClick: () => pressTvKey(k) });
+  const key = (k, label, extra = '', aria = k) =>
+    el('button', { class: `remote-key ${extra}`.trim(), 'data-key': k, 'aria-label': aria, text: label, onClick: () => pressTvKey(k) });
   const keysOff = S.tv && S.tv.keys === false;
   return el(
     'div',
     { class: 'remote' },
-    // Say it before a press fails, not only after.
+    // Say it before a press fails, not only after. Waking works regardless:
+    // the app on the TV can do that without the helper.
     keysOff
-      ? el('p', { class: 'remote-note', text: 'The TV’s key helper isn’t running. It stops when the TV restarts; start it again from the computer (see “Remote keys” in the README).' })
+      ? el('p', { class: 'remote-note', text: 'The TV’s key helper isn’t running, so only “Wake TV” works here. It stops when the TV restarts; start it again from the computer (see “Remote keys” in the README).' })
       : null,
+    el('div', { class: 'remote-row' }, key('wake', '⏻ Wake TV', 'wide', 'wake'), key('sleep', '⏾ Sleep', '', 'sleep')),
     el(
       'div',
       { class: 'dpad' },
@@ -740,7 +742,23 @@ function remotePad() {
       key('right', '▶', 'right'),
       key('down', '▼', 'down')
     ),
-    el('div', { class: 'remote-row' }, key('back', '‹ Back'), key('home', '⌂ Home'), key('playpause', '⏯'))
+    el('div', { class: 'remote-row' }, key('back', '‹ Back'), key('home', '⌂ Home')),
+    el(
+      'div',
+      { class: 'remote-row' },
+      key('previous', '⏮', '', 'previous'),
+      key('rewind', '⏪', '', 'rewind'),
+      key('playpause', '⏯', '', 'play or pause'),
+      key('forward', '⏩', '', 'fast forward'),
+      key('next', '⏭', '', 'next')
+    ),
+    el(
+      'div',
+      { class: 'remote-row' },
+      key('volumedown', '🔉 −', '', 'volume down'),
+      key('mute', '🔇', '', 'mute'),
+      key('volumeup', '🔊 +', '', 'volume up')
+    )
   );
 }
 

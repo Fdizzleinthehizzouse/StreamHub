@@ -145,13 +145,23 @@ one file, `picker/ProfilePickers.kt`.
 
 ---
 
-## Step 5 — remote keys (arrows, OK, Back, Home, play/pause)
+## Step 5 — remote keys (power, arrows, transport, volume)
 
-The phone's **Services** tab has a full remote. Apps aren't allowed to press
-keys on a Fire TV, and this TV also refuses ADB from apps on the TV itself, so
-a small helper does the pressing. It is started from the computer with ADB,
-and only StreamHub can use it (it checks who is asking, and presses only those
-eight buttons).
+The phone's **Services** tab has a full remote: **Wake TV** and **Sleep**,
+the arrows around OK, Back and Home, ⏮ ⏪ ⏯ ⏩ ⏭, and volume down / mute / up.
+
+**Turning the TV on works without any of the setup below.** The TV stays on
+your wifi while it sleeps, so **Wake TV** reaches it and the app wakes the
+screen itself. Everything else needs the key helper.
+
+Fast-forward and rewind do whatever the app you're watching does with them —
+on Prime Video they open its scrubbing bar and pause, and ⏯ starts it again,
+exactly as with the TV's own remote. ⏮ and ⏭ move between episodes.
+
+Apps aren't allowed to press keys on a Fire TV, and this TV also refuses ADB
+from apps on the TV itself, so a small helper does the pressing. It is started
+from the computer with ADB, and only StreamHub can use it (it checks who is
+asking, and presses only the buttons on that remote).
 
 **Start it:** double-click `firetv\start-key-helper.bat` and type the TV's
 address. It prints `StreamHub key helper ready`.
@@ -164,7 +174,7 @@ to stay switched on for this.
 was already running keeps the old version's abilities (HBO Max autoplay needs
 the new one). The script replaces it.
 
-Besides the eight buttons, it can type a title (letters, digits and spaces
+Besides those buttons, it can type a title (letters, digits and spaces
 only, used for HBO Max's search) and report which app is in front and what is
 playing. It never runs anything it is sent.
 

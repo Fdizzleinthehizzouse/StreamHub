@@ -114,7 +114,18 @@ class KeyServerTest {
 
     @Test
     fun onlyFixedKeysExist() {
-        assertEquals(setOf("UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "HOME", "PLAYPAUSE"), KeyServer.KEYS.keys)
+        // A fixed list, so a caller can never ask the helper for anything else.
+        assertEquals(
+            setOf(
+                "UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "HOME", "PLAYPAUSE",
+                "VOLUMEUP", "VOLUMEDOWN", "MUTE", "FORWARD", "REWIND", "NEXT", "PREVIOUS",
+                "WAKE", "SLEEP"
+            ),
+            KeyServer.KEYS.keys
+        )
         assertEquals(KeyServer.KEYS.keys, TvKeys.Key.values().map { it.name }.toSet())
+        // Wake and sleep are separate: one POWER toggle would leave the phone
+        // guessing which way round the TV is.
+        assertTrue(KeyServer.KEYS.keys.none { it == "POWER" })
     }
 }

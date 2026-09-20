@@ -273,13 +273,31 @@ const server = http.createServer(async (req, res) => {
   check('a service missing from the TV says so', (await page.locator('.svc-card').nth(2).textContent()).includes('Not installed'));
 
   const pad = await page.locator('.remote-key').evaluateAll((els) => els.map((e) => e.dataset.key).join(','));
-  check('the phone is a full remote: arrows, OK, Back, Home, play/pause', pad === 'up,left,ok,right,down,back,home,playpause', pad);
-  await page.screenshot({ path: path.join(__dirname, 'shots', '26-tv-remote.png') });
+  check(
+    'the phone is a full remote: power, arrows, navigation, transport, volume',
+    pad === 'wake,sleep,up,left,ok,right,down,back,home,previous,rewind,playpause,forward,next,volumedown,mute,volumeup',
+    pad
+  );
+  await page.screenshot({ path: path.join(__dirname, 'shots', '27-tv-remote.png') });
   calls.length = 0;
   await page.locator('.remote-key[data-key="ok"]').click();
   await page.waitForTimeout(300);
   const okPress = calls.find((c) => c.path === '/api/remote');
   check('OK is sent to the TV', okPress && okPress.body.key === 'ok', JSON.stringify(okPress && okPress.body));
+
+  // The TV stays on the network while asleep, so the phone can turn it on.
+  calls.length = 0;
+  await page.locator('.remote-key[data-key="wake"]').click();
+  await page.waitForTimeout(300);
+  const wakePress = calls.find((c) => c.path === '/api/remote');
+  check('Wake TV is sent as its own button, not a power toggle', wakePress && wakePress.body.key === 'wake', JSON.stringify(wakePress && wakePress.body));
+
+  calls.length = 0;
+  await page.locator('.remote-key[data-key="volumeup"]').click();
+  await page.waitForTimeout(300);
+  const volPress = calls.find((c) => c.path === '/api/remote');
+  check('volume is sent to the TV', volPress && volPress.body.key === 'volumeup', JSON.stringify(volPress && volPress.body));
+
   await page.locator('.remote-key[data-key="playpause"]').click();
   await page.waitForTimeout(400);
   check('a press the TV could not do is reported, not faked', /key helper/.test(await page.locator('#toast').textContent()));
