@@ -136,6 +136,13 @@ your phone's browser.
 **That's it.** Browse on the phone, tap a title, tap a service, and it opens on
 the TV.
 
+**You don't have to turn the TV on first.** StreamHub stays reachable while the
+TV sleeps, so you can browse from the sofa with the screen off and the TV wakes
+up when you send something. Sleeping is normal standby — the screen really is
+off; StreamHub just keeps listening underneath. That listening costs roughly a
+watt, which is somewhere around €2.50 a year. The TV has to be asleep, though,
+not switched off at the wall: nothing can reach it then.
+
 **If someone else's phone ever gets in**, press **New pairing code** on the TV
 screen. That kicks every paired phone off, and you pair yours again.
 
@@ -185,6 +192,14 @@ release, rather than a file from anywhere else.
 **The phone says it can't find the TV.**
 They're on different wifi networks. The usual cause is one of them being on the
 router's *guest* wifi, which keeps devices apart on purpose.
+
+**The phone can't find the TV, but only when the TV is asleep.**
+StreamHub is meant to stay reachable in standby, and from version 1.1 it holds
+the TV's wifi open so it can. If it still goes quiet the moment the TV sleeps,
+the TV is overriding that: look for a network or power setting on the set along
+the lines of *keep network connection while asleep* and switch it on. Fire TV
+models word this differently and some don't have it at all. Failing that, wake
+the TV with its own remote once and the phone will find it again.
 
 **Nothing loads on the phone, though it paired fine.**
 The film-information key from Step 5 is missing or was mistyped. Tap the cog
