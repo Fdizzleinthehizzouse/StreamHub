@@ -86,6 +86,31 @@ class ProfilePickersTest {
     }
 
     @Test
+    fun disneyMatchesAnAccentedNameHoweverItIsWritten() {
+        // A live failure: Disney+ labels its tile with a one-character "é",
+        // the phone can send "e" + a separate accent, and the two are not
+        // equal - so the picker was up, the profile was on it, and nothing
+        // matched. Both spellings, and the plain "Amelie", must find it.
+        val r = dump("disney-picker-2026-09.xml")
+        val precomposed = "Amélie"
+        val decomposed = "Amélie"
+        for (name in listOf(precomposed, decomposed, "Amelie", "amelie")) {
+            val found = disney.recognise(r, name) as Outcome.Found
+            assertTrue("clicks the tile for $name", found.node.clickable)
+        }
+        assertEquals(Outcome.NoSuchProfile, disney.recognise(r, "Amel"))
+    }
+
+    @Test
+    fun disneysPickerTilesCarryNoViewIds() {
+        // Only the labels identify a profile; the tiles themselves have no
+        // view id. "Add Profile" is a tile too and must never be clicked.
+        val r = dump("disney-picker-2026-09.xml")
+        assertEquals(Outcome.NoSuchProfile, disney.recognise(r, "Add Profile"))
+        assertEquals(Outcome.NotPicker, prime.recognise(r, "Bob"))
+    }
+
+    @Test
     fun disneyForgivesCaseAndSpacesFromAPhoneKeyboard() {
         assertTrue(disney.recognise(dump("disney-picker.xml"), "  alice ") is Outcome.Found)
     }
@@ -286,11 +311,16 @@ class ProfilePickersTest {
 
     @Test
     fun aHalfDrawnPickerDoesNotMakeItGiveUp() {
-        // As seen on a real TV: heading up, tiles not yet drawn.
+        // As seen on a real TV: heading up, tiles not yet drawn. A picker with
+        // no profiles on it is not yet the picker - counting those rounds
+        // towards giving up cost a live run, which stopped with "your profile
+        // isn't here" about a screen that was still being drawn.
         val settle = ProfilePickers.Settle()
-        val halfDrawn = disney.recognise(dump("disney-picker-heading-only.xml"), "Bob")
-        assertEquals(Outcome.NoSuchProfile, halfDrawn)
-        repeat(3) { assertEquals(ProfilePickers.Settle.Decision.KeepLooking, settle.next(halfDrawn)) }
+        for (fixture in listOf("disney-picker-heading-only.xml", "disney-picker-loading.xml")) {
+            val halfDrawn = disney.recognise(dump(fixture), "Bob")
+            assertEquals(fixture, Outcome.NotPicker, halfDrawn)
+            repeat(4) { assertEquals(ProfilePickers.Settle.Decision.KeepLooking, settle.next(halfDrawn)) }
+        }
 
         val full = disney.recognise(dump("disney-picker.xml"), "Bob")
         assertTrue(settle.next(full) is ProfilePickers.Settle.Decision.Click)

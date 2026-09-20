@@ -116,8 +116,15 @@ class ProfilePickerService : AccessibilityService() {
         val tree = Live(root, null)
         if (now - job.lastWaitLog > WAIT_LOG_MS && job.playPressedAt == 0L) {
             job.lastWaitLog = now
+            hidden = 0
+            unreadable = 0
             val ids = idsOnScreen(tree).joinToString()
-            Log.i(TAG, "${job.serviceId}: looking (typed=${job.typed} profile=${job.profileDone} opened=${job.tileOpened}, read in ${System.currentTimeMillis() - now} ms); ids=$ids")
+            Log.i(
+                TAG,
+                "${job.serviceId}: looking (typed=${job.typed} profile=${job.profileDone} opened=${job.tileOpened}, " +
+                    "read in ${System.currentTimeMillis() - now} ms, skipped $hidden of which $unreadable unreadable); " +
+                    "read=${nodeCount(root)} live=${countLive(tree)}; windows=${windowsSeen()}; ids=$ids"
+            )
         }
 
         // The search box showing means we are already in a profile.
@@ -255,6 +262,19 @@ class ProfilePickerService : AccessibilityService() {
         return (focused ?: rootInActiveWindow)?.also { it.refresh() }
     }
 
+    /** Every window this service can see, for when the screen reads as empty. */
+    private fun windowsSeen(): String = runCatching {
+        windows.joinToString(" | ") { w ->
+            val r = w.root
+            "t${w.type}${if (w.isFocused) "F" else ""}${if (w.isActive) "A" else ""}:${r?.packageName}/${r?.childCount}/${r?.let { nodeCount(it) }}"
+        }
+    }.getOrElse { "?" }
+
+    private fun countLive(n: ProfilePickers.Node): Int = 1 + n.children.sumBy { countLive(it) }
+
+    private fun nodeCount(n: AccessibilityNodeInfo): Int =
+        1 + (0 until n.childCount).sumBy { i -> n.getChild(i)?.let { nodeCount(it) } ?: 0 }
+
     /** View ids on screen with how often each appears, for the stall log. */
     private fun idsOnScreen(root: ProfilePickers.Node): List<String> {
         val counts = LinkedHashMap<String, Int>()
@@ -365,8 +385,25 @@ class ProfilePickerService : AccessibilityService() {
             // copy. Disney+ swaps its screens inside one window, and on the real
             // TV the cache went on showing its profile screen (empty) long after
             // the search page had replaced it, so the search box was never found.
+            // A failed refresh() is not a missing node: keep what Android
+            // already has. Dropping those cost the whole profile list on
+            // Disney+ - the screen read as "profilesContent" and nothing in
+            // it, so no profile could be picked.
             (0 until info.childCount).mapNotNull { i ->
-                info.getChild(i)?.takeIf { it.refresh() && it.isVisibleToUser }?.let { Live(it, this) }
+                val cached = info.getChild(i) ?: return@mapNotNull null
+                // Re-reading a node is what keeps the screen current, but on
+                // Disney+'s new profile screen (September 2026) refresh()
+                // hands back the node with its children gone - the profiles
+                // vanished and none could be picked. So a refreshed node is
+                // used only while it still holds everything the old one did.
+                val refreshed = AccessibilityNodeInfo.obtain(cached)
+                val child = if (refreshed.refresh() && refreshed.childCount >= cached.childCount) refreshed else cached
+                if (!child.isVisibleToUser) {
+                    hidden++
+                    if (child === cached) unreadable++
+                    return@mapNotNull null
+                }
+                Live(child, this)
             }
         }
     }
@@ -435,6 +472,10 @@ class ProfilePickerService : AccessibilityService() {
         /** The latest request's progress, for the phone that sent it. */
         @Volatile var status: Status? = null
             private set
+
+        /** Parts of the screen left out of the last read, for the diagnostic log. */
+        @Volatile private var hidden = 0
+        @Volatile private var unreadable = 0
 
         /** For [BlindPlay], which reports through the same status. */
         internal fun publish(s: Status) { status = s }

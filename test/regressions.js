@@ -341,6 +341,15 @@ process.exit(0);
   await check('an exact title beats a longer one that merely contains it', () =>
     jvmTest('ProfilePickersTest.anExactNameBeatsALongerOneThatContainsIt'));
 
+  // Live failure: Disney+ writes "é" as one character, a phone can send it as
+  // two, and the profile on screen matched nothing.
+  await check('a profile name matches however its accents are written', () =>
+    jvmTest('ProfilePickersTest.disneyMatchesAnAccentedNameHoweverItIsWritten'));
+
+  // Live failure: "your profile isn't here", about a picker still drawing.
+  await check('a picker with no profiles on it yet is waited for, not given up on', () =>
+    jvmTest('ProfilePickersTest.aHalfDrawnPickerDoesNotMakeItGiveUp'));
+
   // Netflix's profile screen can't be read, so it is counted down by place.
   await check('Netflix profiles are picked by place, and only a real place counts', () =>
     jvmTest('ProfilePickersTest.netflixIgnoresAPlaceThatIsNotOne'));

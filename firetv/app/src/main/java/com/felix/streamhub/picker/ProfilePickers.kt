@@ -93,6 +93,9 @@ object ProfilePickers {
         return scored.filter { it.second.ordinal == best }.singleOrNull()?.first
     }
 
+    /** Any Disney+ profile tile's label, whoever it belongs to. */
+    private val ANY_PROFILE = Regex("^access .+'s profile$")
+
     private val YEAR_SUFFIX = Regex("\\s*\\((\\d{4})\\)\\s*$")
     private val ANY_YEAR = Regex("\\b(19|20)\\d{2}\\b")
 
@@ -199,8 +202,15 @@ object ProfilePickers {
             root.any { it.text == "Who's watching?" }
         if (!onPicker) return@Picker Outcome.NotPicker
 
-        val wanted = "access ${fold(name)}'s profile"
-        val labels = root.all { fold(it.desc) == wanted }
+        // The picker's frame appears before the profiles in it. Seen on the
+        // real TV: with no tiles yet, "your profile isn't here" was reported
+        // about a screen that was still drawing. An empty picker is therefore
+        // not yet the picker.
+        val anyProfile = root.any { ANY_PROFILE.matches(plain(it.desc)) }
+        if (!anyProfile) return@Picker Outcome.NotPicker
+
+        val wanted = "access ${plain(name)}'s profile"
+        val labels = root.all { plain(it.desc) == wanted }
         val tiles = labels.mapNotNull { label ->
             label.parent?.takeIf { it.clickable && it.bounds == label.bounds }
         }
@@ -247,7 +257,7 @@ object ProfilePickers {
         if (!root.any { it.viewId.endsWith(":id/whos_watching_heading") }) return@Picker Outcome.NotPicker
 
         val matches = root.all {
-            it.viewId.endsWith(":id/profile_name") && it.clickable && fold(it.text) == fold(name)
+            it.viewId.endsWith(":id/profile_name") && it.clickable && plain(it.text) == plain(name)
         }.filterNot { label ->
             label.parent?.any { it.viewId.endsWith(":id/profile_add_icon") } ?: true
         }
@@ -369,7 +379,21 @@ object ProfilePickers {
      * MOST LIKED", and `\s` matches NBSP on Android's regex engine but not the
      * JVM's, so behaviour differed between the TV and the tests.
      */
-    private fun fold(s: String) = s.replace(SPACES, " ").trim().lowercase(Locale.ROOT)
+    private fun fold(s: String) =
+        java.text.Normalizer.normalize(s.replace(SPACES, " ").trim(), java.text.Normalizer.Form.NFC).lowercase(Locale.ROOT)
+
+    /**
+     * A name as loosely as it can honestly be compared: accents dropped and
+     * every apostrophe the same. A phone keyboard and a TV app can write the
+     * same name in two ways - Disney+ labels its tiles "Access Félix's
+     * profile" with a one-character é, while a phone may send é as "e" plus a
+     * separate accent, and the two are not equal. That cost a live run: the
+     * picker was up, the profile was on it, and nothing matched.
+     */
+    private fun plain(s: String) =
+        java.text.Normalizer.normalize(fold(s), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+            .replace(Regex("['’‘`]"), "'")
 
     private val SPACES = Regex("[\\s\\u00A0\\u2007\\u202F\\u2009\\u200A\\u3000]+")
 
