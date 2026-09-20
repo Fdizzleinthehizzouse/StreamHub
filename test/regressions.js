@@ -362,6 +362,12 @@ process.exit(0);
   await check('HBO Max: only the wanted title counts as playing ("Dune: Part Two" is not "Dune")', () =>
     jvmTest('ProfilePickersTest.whatIsPlayingMustNameTheTitle'));
 
+  // The phone lost the TV whenever it slept: the server ran with nothing
+  // holding the wifi chip or the CPU awake, so Fire OS parked both and even
+  // Wake TV - the one button that would have fixed it - went with them.
+  await check('the server never runs without the locks that survive standby', () =>
+    jvmTest('StandbyLocksTest'));
+
   const failed = checks.filter((c) => !c).length;
   console.log(`\n${checks.length - failed}/${checks.length} checks passed`);
   process.exit(failed ? 1 : 0);

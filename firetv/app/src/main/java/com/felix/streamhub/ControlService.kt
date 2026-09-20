@@ -9,7 +9,6 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import com.felix.streamhub.data.Store
-import fi.iki.elonen.NanoHTTPD
 
 /**
  * The receiving half of "control the TV from the PC or phone".
@@ -23,7 +22,7 @@ import fi.iki.elonen.NanoHTTPD
  */
 class ControlService : Service() {
 
-    private var server: ControlServer? = null
+    private var session: ControlSession? = null
     private lateinit var store: Store
 
     override fun onCreate() {
@@ -34,23 +33,27 @@ class ControlService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         startInForeground()
-        if (server == null) {
-            server = ControlServer(applicationContext, store).also {
-                runCatching { it.start(NanoHTTPD.SOCKET_READ_TIMEOUT, true) }
-                    .onFailure { e -> android.util.Log.e(TAG, "control server failed to start", e) }
-            }
+        // The session holds the standby locks as well as the server. A
+        // foreground service is not enough on its own: without them the TV
+        // parks its wifi and suspends on the way into standby, and the phone
+        // loses the whole remote - Wake TV included - until someone turns the
+        // TV on by hand. See StandbyLocks.
+        if (session == null) {
+            session = ControlSession(StandbyLocks.forTv(applicationContext)) {
+                ControlServer(applicationContext, store)
+            }.also { it.start() }
         }
         return START_STICKY
     }
 
     override fun onDestroy() {
-        runCatching { server?.stop() }
-        server = null
+        session?.stop()
+        session = null
         super.onDestroy()
     }
 
     /** Throw every paired phone off - called when the code is rotated. */
-    fun unpairAll() = server?.revokeAll()
+    fun unpairAll() = session?.revokeAll()
 
     override fun onBind(intent: Intent?): IBinder? = null
 

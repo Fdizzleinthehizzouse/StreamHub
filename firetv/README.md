@@ -231,6 +231,13 @@ the arrows around OK, Back and Home, ⏮ ⏪ ⏯ ⏩ ⏭, and volume down / mute
 your wifi while it sleeps, so **Wake TV** reaches it and the app wakes the
 screen itself. Everything else needs the key helper.
 
+That only holds because StreamHub pins the wifi chip and the CPU awake for as
+long as its server is running (`StandbyLocks.kt`). Without those locks Fire OS
+parks both on the way into standby and the phone loses the TV completely —
+browsing, search and **Wake TV** together, which leaves no way back in except
+the TV's own remote. The screen still turns off and standby still happens as
+normal; it is only the CPU underneath that stays up.
+
 **You rarely need that button.** Sending a title wakes the TV by itself when
 it's asleep, and the phone says "Woke the TV" so a dark screen and a few
 seconds of nothing don't look like a failure. It only wakes the TV when the TV
