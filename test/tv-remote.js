@@ -95,9 +95,20 @@ const server = http.createServer(async (req, res) => {
       ],
     });
   }
-  if (p === '/api/genre') {
-    if (url.searchParams.get('id') !== 'scifi') return send(400, { error: 'Unknown genre.' });
-    return send(200, { genre: 'Sci-fi & fantasy', results: [{ ...TITLES[1], availableOn: [{ serviceId: 'hbomax', kind: 'included' }] }] });
+  if (p === '/api/browse') {
+    const q = url.searchParams;
+    if (q.get('genre') && q.get('genre') !== 'scifi') return send(400, { error: 'Unknown genre.' });
+    const page = Number(q.get('page') || '1');
+    // Page 1 holds one title, page 2 another, and then there are no more:
+    // enough to prove the phone keeps what it has and adds to it.
+    const one = { ...TITLES[1], availableOn: [{ serviceId: 'hbomax', kind: 'included' }] };
+    const two = { ...TITLES[2], availableOn: [{ serviceId: 'netflix', kind: 'included' }] };
+    return send(200, {
+      title: q.get('service') ? 'Netflix' : 'Sci-fi & fantasy',
+      results: page === 1 ? [one] : page === 2 ? [two] : [],
+      page,
+      hasMore: page < 2,
+    });
   }
   if (p === '/api/remote') {
     // As after a TV restart, before the key helper is started again.
@@ -226,10 +237,32 @@ const server = http.createServer(async (req, res) => {
   calls.length = 0;
   await page.locator('.chip.genre[data-genre="scifi"]').click();
   await page.waitForTimeout(500);
-  const genreCall = calls.find((c) => c.path === '/api/genre');
-  check('a genre asks the TV for that genre', genreCall && genreCall.query.id === 'scifi', JSON.stringify(genreCall));
-  check('and lists what is in it, tagged by service', (await page.locator('.grid .card').count()) === 1 && (await page.locator('.grid .card .badge').textContent()) === 'HBO');
+  const genreCall = calls.find((c) => c.path === '/api/browse');
+  check('a genre asks the TV for that genre', genreCall && genreCall.query.genre === 'scifi', JSON.stringify(genreCall));
+  check('and lists what is in it, tagged by service', (await page.locator('.grid .card').first().locator('.badge').textContent()) === 'HBO');
   await page.screenshot({ path: path.join(__dirname, 'shots', '25-tv-genre.png') });
+
+  // Browsing used to stop at the first 20 titles, so anything further down a
+  // service's catalogue could only ever be found by searching. Now reaching
+  // the end of the list fetches the next page - here the whole list fits on
+  // screen, so the second page is asked for straight away.
+  check('reaching the end of the list asks for the next page', calls.filter((c) => c.path === '/api/browse').map((c) => c.query.page).join(',') === '1,2', JSON.stringify(calls.map((c) => c.query)));
+  check('and both pages are shown together', (await page.locator('.grid .card').count()) === 2);
+  check('the end of the list says so, once there is no more', (await page.locator('#browse-more').count()) === 0 && (await page.locator('#browse-foot').textContent()).includes('everything'));
+
+  calls.length = 0;
+  await page.locator('.browse-controls .chip[data-sort="new"]').click();
+  await page.waitForTimeout(700);
+  const sorted = calls.filter((c) => c.path === '/api/browse');
+  check('a different order starts again at page one', sorted.length && sorted[0].query.sort === 'new' && sorted[0].query.page === '1', JSON.stringify(sorted.map((c) => c.query)));
+
+  calls.length = 0;
+  await page.locator('.browse-controls .chip[data-kind="tv"]').click();
+  await page.waitForTimeout(700);
+  const filtered = calls.filter((c) => c.path === '/api/browse');
+  check('films or series is passed to the TV, keeping the order', filtered.length && filtered[0].query.kind === 'tv' && filtered[0].query.sort === 'new', JSON.stringify(filtered.map((c) => c.query)));
+  await page.screenshot({ path: path.join(__dirname, 'shots', '26-tv-browse.png') });
+
   await page.locator('#back-btn').click();
   await page.waitForTimeout(400);
   check('back returns home', (await page.locator('.chip.genre').count()) === 2);
@@ -252,10 +285,20 @@ const server = http.createServer(async (req, res) => {
   check('a press the TV could not do is reported, not faked', /key helper/.test(await page.locator('#toast').textContent()));
 
   calls.length = 0;
-  await page.locator('.svc-card').first().click();
+  // The card itself browses what the service carries; the small button is
+  // what opens the app on the TV.
+  await page.locator('.svc-card').first().locator('.svc-browse').click();
+  await page.waitForTimeout(500);
+  const svcBrowse = calls.find((c) => c.path === '/api/browse');
+  check('tapping a service browses what is on it', svcBrowse && svcBrowse.query.service === 'netflix', JSON.stringify(calls.map((c) => c.path)));
+  await page.locator('#back-btn').click();
+  await page.waitForTimeout(300);
+
+  calls.length = 0;
+  await page.locator('.svc-card').first().locator('.svc-open').click();
   await page.waitForTimeout(400);
   const svcPlay = calls.find((c) => c.path === '/api/play');
-  check('tapping a service opens it on the TV', svcPlay && svcPlay.body.serviceId === 'netflix', JSON.stringify(calls.map((c) => c.path)));
+  check('and its Open on TV button opens it there', svcPlay && svcPlay.body.serviceId === 'netflix', JSON.stringify(calls.map((c) => c.path)));
 
   await page.fill('#q', 'breaking bad');
   await page.press('#q', 'Enter');
@@ -285,7 +328,7 @@ const server = http.createServer(async (req, res) => {
 
   await page.locator('.tab[data-view="services"]').click();
   await page.waitForTimeout(300);
-  const hbo = page.locator('.svc-card').nth(2); // HBO Max, not installed
+  const hbo = page.locator('.svc-card').nth(2).locator('.svc-open'); // HBO Max, not installed
   await hbo.click();
   await page.waitForTimeout(500);
   const toastText = await page.locator('#toast').textContent();
@@ -356,4 +399,10 @@ const server = http.createServer(async (req, res) => {
   const failed = checks.filter((c) => !c).length;
   console.log(`\n${checks.length - failed}/${checks.length} checks passed, ${errors.length} runtime errors`);
   process.exit(failed || errors.length ? 1 : 0);
-})().catch((e) => { console.error(e); process.exit(1); });
+})().catch((e) => {
+  // The page's own errors are usually the reason a step timed out, and they
+  // are worthless after the process has gone.
+  if (errors.length) { console.log('Runtime errors:'); errors.forEach((x) => console.log('  ' + x)); }
+  console.error(e);
+  process.exit(1);
+});

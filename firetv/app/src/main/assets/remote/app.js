@@ -447,7 +447,7 @@ function setView(view, fromBack = false) {
   if (view === 'services') return renderServices(host);
   if (view === 'watchlist') return renderWatchlist(host);
   if (view === 'search') return; // rendered by doSearch
-  if (view === 'genre') return S.genre ? doGenre(S.genre, true) : renderHome(host);
+  if (view === 'browse') return S.browse ? browse({}, true) : renderHome(host);
 }
 
 /** A row of genre buttons, at the top of Home. */
@@ -460,22 +460,146 @@ function genreChips() {
   );
 }
 
-async function doGenre(genre, fromBack = false) {
-  S.genre = genre;
-  if (!fromBack) setView('genre');
+const SORTS = [
+  ['popular', 'Popular'],
+  ['new', 'Newest'],
+  ['rated', 'Highest rated'],
+];
+const KINDS = [
+  ['', 'All'],
+  ['movie', 'Films'],
+  ['tv', 'Series'],
+];
+
+/** Open the browse page for a genre, a service, or both. */
+function doGenre(genre) {
+  browse({ genre: genre.id, title: genre.name, service: '' });
+}
+
+function browseService(svc) {
+  browse({ service: svc.id, title: svc.name, genre: '' });
+}
+
+/**
+ * The browse page: one TMDB page at a time, more as you scroll. Browsing used
+ * to stop at the first 20 titles a row could hold, so anything further down a
+ * service's catalogue could only be found by searching.
+ */
+function browse(opts, fromBack = false) {
+  S.browse = Object.assign({ sort: 'popular', kind: '', page: 0, items: [], hasMore: true, loading: false }, S.browse && fromBack ? S.browse : {}, opts);
+  if (!fromBack) setView('browse');
+  renderBrowse();
+  loadMoreBrowse(true);
+}
+
+function renderBrowse() {
+  const b = S.browse;
   const host = $('#view');
-  host.replaceChildren(el('h1', { class: 'page-title', text: genre.name }), el('div', { class: 'spinner' }));
-  try {
-    const data = await api(`/api/genre?id=${encodeURIComponent(genre.id)}`);
-    host.replaceChildren(
-      el('h1', { class: 'page-title', text: genre.name }),
-      el('p', { class: 'page-sub', text: 'On your four services' }),
-      data.results.length
-        ? el('div', { class: 'grid' }, data.results.map(card))
-        : el('div', { class: 'empty' }, el('strong', { text: 'Nothing here' }), 'None of your services has much in this genre right now.')
+  host.replaceChildren(
+    el('h1', { class: 'page-title', text: b.title }),
+    el('p', { class: 'page-sub', text: 'On your four services' }),
+    el(
+      'div',
+      { class: 'browse-controls' },
+      el('div', { class: 'chips' }, SORTS.map(([id, label]) =>
+        el('button', {
+          class: 'chip' + (b.sort === id ? ' on' : ''),
+          text: label,
+          'data-sort': id,
+          onClick: () => reloadBrowse({ sort: id }),
+        })
+      )),
+      el('div', { class: 'chips' }, KINDS.map(([id, label]) =>
+        el('button', {
+          class: 'chip' + (b.kind === id ? ' on' : ''),
+          text: label,
+          'data-kind': id || 'all',
+          onClick: () => reloadBrowse({ kind: id }),
+        })
+      ))
+    ),
+    el('div', { class: 'grid', id: 'browse-grid' }, b.items.map(card)),
+    el('div', { class: 'browse-foot', id: 'browse-foot' })
+  );
+  renderBrowseFoot();
+}
+
+/** The same list, ordered or filtered differently: start again at page one. */
+function reloadBrowse(change) {
+  Object.assign(S.browse, change, { page: 0, items: [], hasMore: true });
+  renderBrowse();
+  loadMoreBrowse(true);
+}
+
+function renderBrowseFoot() {
+  const foot = $('#browse-foot');
+  if (!foot) return;
+  const b = S.browse;
+  if (b.loading) return foot.replaceChildren(el('div', { class: 'spinner' }));
+  if (b.error) {
+    return foot.replaceChildren(
+      el('div', { class: 'empty' }, el('strong', { text: 'Could not load' }), b.error),
+      el('button', { class: 'btn', text: 'Try again', onClick: () => loadMoreBrowse() })
     );
+  }
+  if (!b.items.length) {
+    return foot.replaceChildren(
+      el('div', { class: 'empty' }, el('strong', { text: 'Nothing here' }), 'None of your services has much of this right now.')
+    );
+  }
+  // A button as well as the scroll trigger: scrolling alone is invisible.
+  foot.replaceChildren(
+    b.hasMore
+      ? el('button', { class: 'btn big', id: 'browse-more', text: 'Show more', onClick: () => loadMoreBrowse() })
+      : el('p', { class: 'page-sub', text: 'That’s everything on your services.' })
+  );
+  if (b.hasMore) watchBrowseFoot();
+}
+
+/** Load the next page when the end of the list comes into view. */
+let browseObserver = null;
+function watchBrowseFoot() {
+  const more = $('#browse-more');
+  if (!more || typeof IntersectionObserver !== 'function') return;
+  if (browseObserver) browseObserver.disconnect();
+  browseObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMoreBrowse();
+    },
+    { root: $('#view'), rootMargin: '300px' }
+  );
+  browseObserver.observe(more);
+}
+
+async function loadMoreBrowse(first = false) {
+  const b = S.browse;
+  if (b.loading || (!b.hasMore && !first)) return;
+  b.loading = true;
+  b.error = null;
+  renderBrowseFoot();
+  const page = b.page + 1;
+  const q = new URLSearchParams({ page: String(page) });
+  if (b.genre) q.set('genre', b.genre);
+  if (b.service) q.set('service', b.service);
+  if (b.sort) q.set('sort', b.sort);
+  if (b.kind) q.set('kind', b.kind);
+  try {
+    const data = await api(`/api/browse?${q}`);
+    // A newer request (another sort, say) may have replaced this one.
+    if (S.browse !== b) return;
+    b.page = page;
+    b.hasMore = !!data.hasMore;
+    const seen = new Set(b.items.map((i) => `${i.mediaType}:${i.id}`));
+    b.items = b.items.concat(data.results.filter((i) => !seen.has(`${i.mediaType}:${i.id}`)));
+    b.loading = false;
+    const grid = $('#browse-grid');
+    if (grid) grid.replaceChildren(...b.items.map(card));
+    renderBrowseFoot();
   } catch (err) {
-    host.replaceChildren(el('div', { class: 'empty' }, el('strong', { text: 'Could not load' }), err.message));
+    if (S.browse !== b) return;
+    b.loading = false;
+    b.error = err.message;
+    renderBrowseFoot();
   }
 }
 
@@ -575,18 +699,18 @@ function renderServices(host) {
       S.services.map((svc) => {
         const installed = S.tv && S.tv.services ? S.tv.services[svc.id] : undefined;
         return el(
-          'button',
-          {
-            class: 'svc-card',
-            style: { background: 'var(--bg-2)' },
-            onClick: () => playOnTv(svc.id, null),
-          },
+          'div',
+          { class: 'svc-card', style: { background: 'var(--bg-2)' } },
           el('div', { class: 'glow', style: { background: `radial-gradient(120% 120% at 0% 0%, ${svc.accent}, transparent 66%)` } }),
-          el('div', { class: 'n', text: svc.name }),
-          el('div', {
-            class: 's',
-            text: installed === false ? 'Not installed on the TV' : 'Open on TV',
-          })
+          // Browsing what a service carries is the common one, so it's the
+          // whole card; opening the app on the TV is the small button.
+          el(
+            'button',
+            { class: 'svc-browse', 'data-service': svc.id, onClick: () => browseService(svc) },
+            el('div', { class: 'n', text: svc.name }),
+            el('div', { class: 's', text: installed === false ? 'Not installed on the TV' : 'Browse what’s on it' })
+          ),
+          el('button', { class: 'btn small svc-open', text: 'Open on TV', onClick: () => playOnTv(svc.id, null) })
         );
       })
     ),

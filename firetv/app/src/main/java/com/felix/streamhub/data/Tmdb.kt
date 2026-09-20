@@ -144,10 +144,30 @@ class Tmdb(private val store: Store) {
         genres: Collection<Int>? = null,
         sortBy: String = "popularity.desc",
         extra: Map<String, String> = emptyMap()
-    ): List<Title> {
-        val params = discoverParams(region, providerIds, genres, sortBy, extra)
+    ): List<Title> = discoverPage(mediaType, providerIds, genres, sortBy, extra).items
+
+    /** One page of discover: TMDB gives 20 at a time, and says how many there are. */
+    data class Page(val items: List<Title>, val page: Int, val totalPages: Int) {
+        val hasMore get() = page < totalPages
+    }
+
+    suspend fun discoverPage(
+        mediaType: String,
+        providerIds: Collection<Int>? = null,
+        genres: Collection<Int>? = null,
+        sortBy: String = "popularity.desc",
+        extra: Map<String, String> = emptyMap(),
+        page: Int = 1
+    ): Page {
+        val params = discoverParams(region, providerIds, genres, sortBy, extra) +
+            mapOf("page" to page.coerceIn(1, MAX_PAGE).toString())
         val res = Http.getJson(url("/discover/$mediaType", params))
-        return res.optJSONArray("results").objects().map { Title.fromTmdb(it, mediaType) }
+        return Page(
+            res.optJSONArray("results").objects().map { Title.fromTmdb(it, mediaType) },
+            res.optInt("page", page),
+            // TMDB refuses pages past 500 even when it claims more.
+            res.optInt("total_pages", 1).coerceAtMost(MAX_PAGE)
+        )
     }
 
     suspend fun trending(): List<Title> {
@@ -158,6 +178,22 @@ class Tmdb(private val store: Store) {
     }
 
     companion object {
+        const val MAX_PAGE = 500
+
+        /**
+         * How a browse list is ordered. "New" needs a date ceiling or TMDB
+         * lists things that haven't come out, and a low vote floor or a fresh
+         * release is held back until enough people have rated it.
+         */
+        fun sortParams(sort: String, mediaType: String, today: String): Pair<String, Map<String, String>> {
+            val dateField = if (mediaType == "tv") "first_air_date" else "primary_release_date"
+            return when (sort) {
+                "new" -> "$dateField.desc" to mapOf("$dateField.lte" to today, "vote_count.gte" to "0")
+                "rated" -> "vote_average.desc" to mapOf("vote_count.gte" to if (mediaType == "tv") "300" else "400")
+                else -> "popularity.desc" to emptyMap()
+            }
+        }
+
         fun image(path: String?, size: String = "w342"): String? =
             if (path.isNullOrEmpty()) null else "https://image.tmdb.org/t/p/$size$path"
 

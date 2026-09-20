@@ -73,27 +73,9 @@ class Recommender(private val tmdb: Tmdb, private val store: Store) {
         return rows
     }
 
-    suspend fun browseService(serviceId: String): List<Row> {
-        val ids = runCatching { tmdb.providerIds() }.getOrDefault(emptyMap())[serviceId].orEmpty()
-        if (ids.isEmpty()) return emptyList()
-
-        val rows = mutableListOf<Row>()
-        runCatching { rows += Row("pm", "Popular films", null, tmdb.discover("movie", ids).take(20)) }
-        runCatching { rows += Row("ps", "Popular series", null, tmdb.discover("tv", ids).take(20)) }
-        runCatching {
-            rows += Row(
-                "tm", "Highest rated films", null,
-                tmdb.discover("movie", ids, sortBy = "vote_average.desc", extra = mapOf("vote_count.gte" to "400")).take(20)
-            )
-        }
-        runCatching {
-            rows += Row(
-                "ts", "Highest rated series", null,
-                tmdb.discover("tv", ids, sortBy = "vote_average.desc", extra = mapOf("vote_count.gte" to "300")).take(20)
-            )
-        }
-        return rows.filter { it.items.isNotEmpty() }
-    }
+    // Browsing one service used to live here as four fixed rows of 20. It is
+    // now /api/browse, which pages through the whole catalogue and can be
+    // sorted and filtered - see ControlServer.doBrowse.
 
     /** Genre ids weighted by how recently and how often they show up in your activity. */
     private fun tasteGenres(deviceId: String): List<Int> {

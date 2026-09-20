@@ -173,9 +173,17 @@ playing. It never runs anything it is sent.
 ## Using it
 
 Browse, search or pick a genre on your phone. Everything shown is on at least
-one of your four services, tagged with which. Tap a film, tap a service, and
-the TV opens it. How close it gets depends on the service (tested on a real
-Fire TV):
+one of your four services, tagged with which.
+
+**Browsing keeps going.** A genre, or a service from the Services tab, opens a
+list that loads more as you scroll — the whole catalogue TMDB knows about, not
+the first screenful. Order it by **Popular**, **Newest** or **Highest rated**,
+and narrow it to **Films** or **Series**. Each new batch is checked against
+your services before it appears, so a long scroll gets gradually slower; that
+check is remembered for half an hour.
+
+Tap a film, tap a service, and the TV opens it. How close it gets depends on
+the service (tested on a real Fire TV):
 
 | Service | What happens |
 |---|---|

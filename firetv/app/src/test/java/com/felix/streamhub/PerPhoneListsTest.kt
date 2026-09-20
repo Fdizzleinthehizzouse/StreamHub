@@ -7,6 +7,7 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.net.HttpURLConnection
@@ -114,6 +115,26 @@ class PerPhoneListsTest {
     private fun profileFor(o: JSONObject, serviceId: String): String {
         val arr = o.getJSONArray("services")
         return (0 until arr.length()).map { arr.getJSONObject(it) }.first { it.getString("id") == serviceId }.getString("profile")
+    }
+
+    /**
+     * Browsing takes what the phone sends straight into a TMDB query, so the
+     * server has to be the one deciding what is allowed.
+     */
+    @Test
+    fun browsingOnlyAcceptsGenresAndServicesTheTvKnows() {
+        val token = pair(DEVICE_A)
+        assertEquals(400, call("GET", "/api/browse?genre=notagenre", token).first)
+        assertEquals(400, call("GET", "/api/browse?service=itunes", token).first)
+        // A query it does know answers as a page, and says which page it is,
+        // so the phone can ask for the next one. (Offline here, so it holds
+        // nothing: what matters is the shape and that the page is echoed.)
+        val (status, body) = call("GET", "/api/browse?genre=action&sort=new&kind=movie&page=3", token)
+        assertEquals(body, 200, status)
+        val page = JSONObject(body)
+        assertEquals(3, page.getInt("page"))
+        assertTrue(body, page.has("results") && page.has("hasMore"))
+        assertEquals(401, call("GET", "/api/browse", null).first)
     }
 
     @Test

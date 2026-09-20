@@ -98,7 +98,7 @@ class ControlServer(
             uri == "/api/state" -> json(Response.Status.OK, stateJson(deviceId))
             uri == "/api/home" -> doHome(deviceId)
             uri == "/api/search" -> doSearch(q("q"))
-            uri == "/api/genre" -> doGenre(q("id"))
+            uri == "/api/browse" -> doBrowse(mapOf("service" to q("service"), "genre" to q("genre"), "sort" to q("sort"), "kind" to q("kind"), "page" to q("page")))
             uri == "/api/details" -> doDetails(q("mediaType"), q("id"))
             uri == "/api/watchlist" -> doToggle(session, deviceId, pinned = false)
             uri == "/api/pinned" -> doToggle(session, deviceId, pinned = true)
@@ -231,23 +231,56 @@ class ControlServer(
         return json(Response.Status.OK, JSONObject().put("results", results))
     }
 
-    /** Films and series in one genre, from the four services only. */
-    private fun doGenre(id: String?): Response {
-        val g = Genres.byId(id) ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown genre."))
+    /**
+     * Browsing: one page of films and series from the four services, narrowed
+     * to one service and/or genre, ordered as asked. Paged, because TMDB hands
+     * out 20 at a time and a row of 20 was all the phone could ever show -
+     * searching found titles that browsing never reached.
+     */
+    private fun doBrowse(params: Map<String, String?>): Response {
         if (!tmdb.hasKey()) return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Add your TMDB key in Settings first."))
-        val items = runCatching {
+        val genreId = params["genre"]?.ifBlank { null }
+        val genre = genreId?.let { Genres.byId(it) ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown genre.")) }
+        val serviceId = params["service"]?.ifBlank { null }
+        if (serviceId != null && Services.byId(serviceId) == null) {
+            return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Unknown service."))
+        }
+        val sort = params["sort"]?.takeIf { it in SORTS } ?: "popular"
+        val kind = params["kind"]?.takeIf { it == "movie" || it == "tv" }
+        val page = params["page"]?.toIntOrNull()?.coerceIn(1, Tmdb.MAX_PAGE) ?: 1
+
+        val today = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ROOT).format(java.util.Date())
+        val loaded = runCatching {
             runBlocking {
-                val providers = tmdb.providerIds().values.flatten()
+                val ids = tmdb.providerIds()
+                val providers = if (serviceId != null) ids[serviceId].orEmpty().toList() else ids.values.flatten()
+                if (providers.isEmpty()) return@runBlocking emptyList<Tmdb.Page>()
                 coroutineScope {
-                    val films = async { g.movie?.let { tmdb.discover("movie", providers, it) }.orEmpty() }
-                    val series = async { g.tv?.let { tmdb.discover("tv", providers, it) }.orEmpty() }
-                    interleave(films.await(), series.await())
+                    listOf("movie", "tv")
+                        .filter { kind == null || kind == it }
+                        // A genre with no match on one side (Kids has no film
+                        // genre, Horror no series one) simply has no such page.
+                        .filter { genre == null || (if (it == "tv") genre.tv else genre.movie) != null }
+                        .map { type ->
+                            val genres = if (type == "tv") genre?.tv else genre?.movie
+                            val (sortBy, extra) = Tmdb.sortParams(sort, type, today)
+                            async { tmdb.discoverPage(type, providers, genres, sortBy, extra, page) }
+                        }.awaitAll()
                 }
             }
-        }.getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Could not load that genre.")) }
-        val results = onTheFour(items)
+        }.getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Could not load that.")) }
+
+        val items = interleaveAll(loaded.map { it.items })
+        val results = onTheFour(items, limit = BROWSE_CHECK_LIMIT)
             ?: return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", "Couldn’t check where these stream. Try again."))
-        return json(Response.Status.OK, JSONObject().put("genre", g.name).put("results", results))
+        return json(
+            Response.Status.OK,
+            JSONObject()
+                .put("title", genre?.name ?: Services.byId(serviceId ?: "")?.name ?: "Everything")
+                .put("results", results)
+                .put("page", page)
+                .put("hasMore", loaded.any { it.hasMore })
+        )
     }
 
     /**
@@ -257,11 +290,11 @@ class ControlServer(
      * @return null if no lookup succeeded at all, rather than an empty list
      *   that would read as "nothing is on your services".
      */
-    private fun onTheFour(items: List<Title>): JSONArray? {
+    private fun onTheFour(items: List<Title>, limit: Int = SEARCH_CHECK_LIMIT): JSONArray? {
         val checked = runBlocking {
             runCatching { tmdb.providerIds() } // once, not once per parallel lookup
             coroutineScope {
-                items.distinctBy { it.key }.take(SEARCH_CHECK_LIMIT).map { t ->
+                items.distinctBy { it.key }.take(limit).map { t ->
                     async { t to runCatching { tmdb.availability(t.mediaType, t.id) }.getOrNull() }
                 }.awaitAll()
             }
@@ -275,8 +308,13 @@ class ControlServer(
         return results
     }
 
-    private fun interleave(a: List<Title>, b: List<Title>): List<Title> =
-        (0 until maxOf(a.size, b.size)).flatMap { i -> listOfNotNull(a.getOrNull(i), b.getOrNull(i)) }
+    private fun interleave(a: List<Title>, b: List<Title>): List<Title> = interleaveAll(listOf(a, b))
+
+    /** Films and series alternating, so neither kind fills the top of a page. */
+    private fun interleaveAll(lists: List<List<Title>>): List<Title> {
+        val longest = lists.maxOfOrNull { it.size } ?: 0
+        return (0 until longest).flatMap { i -> lists.mapNotNull { it.getOrNull(i) } }
+    }
 
     private fun availabilityJson(list: List<Availability>): JSONArray {
         val arr = JSONArray()
@@ -576,6 +614,11 @@ class ControlServer(
     private companion object {
         /** One availability lookup per result; TMDB's first page is plenty. */
         const val SEARCH_CHECK_LIMIT = 20
+
+        /** A browse page asks TMDB for films and series, so it holds twice as many. */
+        const val BROWSE_CHECK_LIMIT = 40
+
+        val SORTS = setOf("popular", "new", "rated")
 
         val ASSETS = mapOf(
             "/index.html" to "text/html; charset=utf-8",
