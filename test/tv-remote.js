@@ -151,7 +151,8 @@ const server = http.createServer(async (req, res) => {
   }
   if (p === '/api/play') {
     if (!body.serviceId) return send(400, { error: 'Pick one of the services.' });
-    if (body.serviceId === 'primevideo') return send(200, { ok: true, kind: 'search', autoplay: true, service: 'Prime Video', state: { watchlist: [], pinned: [] } });
+    // As when a title arrives while the TV sleeps: it wakes itself first.
+    if (body.serviceId === 'primevideo') return send(200, { ok: true, kind: 'search', autoplay: true, woke: true, service: 'Prime Video', state: { watchlist: [], pinned: [] } });
     if (body.serviceId === 'hbomax') return send(200, { ok: false, error: 'HBO Max is not installed on this TV.' });
     // Netflix has no working search link on a real TV: home screen only.
     return send(200, { ok: true, kind: 'home', service: 'Netflix', state: { watchlist: [], pinned: [] } });
@@ -374,6 +375,8 @@ const server = http.createServer(async (req, res) => {
   await page.waitForTimeout(300);
   const firstToast = await page.locator('#toast').textContent();
   check('autoplay starts by saying it is looking, not playing', /finding “Dune”/.test(firstToast) && !/Playing/.test(firstToast), firstToast);
+  // A dark room and a few seconds of nothing would otherwise read as failure.
+  check('and says when the TV had to be woken first', /Woke the TV/.test(firstToast), firstToast);
   await page.waitForTimeout(5200);
   const doneToast = await page.locator('#toast').textContent();
   check('and says playing once the TV confirms it', /▶ Playing “Dune” on Prime Video/.test(doneToast), doneToast);

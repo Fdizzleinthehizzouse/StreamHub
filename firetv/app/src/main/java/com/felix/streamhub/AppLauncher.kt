@@ -73,19 +73,24 @@ object AppLauncher {
     }
 
     /**
-     * End the screensaver before opening anything. On a real Fire TV, an app
-     * started while the screensaver ran opened *behind* it: the phone said
-     * "opened" and the TV showed nothing. ACQUIRE_CAUSES_WAKEUP takes the
-     * system from dreaming back to awake, which dismisses the screensaver.
+     * Wake the TV, if it needs waking, before opening anything. Two cases seen
+     * on the real TV: asleep (the TV stays on the wifi, so a title sent from
+     * the phone arrives and has to turn the screen on), and the screensaver,
+     * where an app started while it ran opened *behind* it - the phone said
+     * "opened" and the TV showed nothing. ACQUIRE_CAUSES_WAKEUP covers both:
+     * it takes the system from asleep or dreaming back to awake.
+     *
+     * @return true only if the TV was actually woken, so the phone can say so.
      */
-    fun wakeScreen(context: Context) {
-        runCatching {
-            val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-            @Suppress("DEPRECATION")
-            pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "streamhub:wake")
-                .acquire(3_000)
-        }
-    }
+    fun wakeScreen(context: Context): Boolean = runCatching {
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        // Already awake and not dreaming: leave the TV alone.
+        val asleep = !pm.isInteractive
+        @Suppress("DEPRECATION")
+        pm.newWakeLock(PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP, "streamhub:wake")
+            .acquire(3_000)
+        asleep
+    }.getOrDefault(false)
 
     fun launch(
         context: Context,

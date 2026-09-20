@@ -154,6 +154,11 @@ the arrows around OK, Back and Home, ⏮ ⏪ ⏯ ⏩ ⏭, and volume down / mute
 your wifi while it sleeps, so **Wake TV** reaches it and the app wakes the
 screen itself. Everything else needs the key helper.
 
+**You rarely need that button.** Sending a title wakes the TV by itself when
+it's asleep, and the phone says "Woke the TV" so a dark screen and a few
+seconds of nothing don't look like a failure. It only wakes the TV when the TV
+was actually asleep.
+
 Fast-forward and rewind do whatever the app you're watching does with them —
 on Prime Video they open its scrubbing bar and pause, and ⏯ starts it again,
 exactly as with the TV's own remote. ⏮ and ⏭ move between episodes.

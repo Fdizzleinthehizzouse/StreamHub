@@ -995,8 +995,11 @@ async function playOnTv(serviceId, item) {
     }
     if (res.state) S.state = res.state;
     S.homeCache = null;
-    if (res.autoplay && item) followAutoplay(svc.name, item.title);
-    else toast(playMessage(res.kind, svc.name, item && item.title));
+    // The TV wakes itself when a title arrives while it sleeps. Say so, so a
+    // dark room and a few seconds of nothing don't read as a failure.
+    const woke = res.woke ? 'Woke the TV. ' : '';
+    if (res.autoplay && item) followAutoplay(svc.name, item.title, woke);
+    else toast(woke + playMessage(res.kind, svc.name, item && item.title));
     closeSheet();
     updateBadge();
   } catch (err) {
@@ -1009,9 +1012,9 @@ async function playOnTv(serviceId, item) {
  * when the TV has confirmed it (from Android's media session), never on hope.
  */
 let autoplayRun = 0;
-async function followAutoplay(service, title) {
+async function followAutoplay(service, title, prefix = '') {
   const run = ++autoplayRun; // a newer title supersedes this one
-  toast(`${service}: finding “${title}”…`);
+  toast(`${prefix}${service}: finding “${title}”…`);
   let last = '';
   const deadline = Date.now() + 110000;
   while (run === autoplayRun && Date.now() < deadline) {

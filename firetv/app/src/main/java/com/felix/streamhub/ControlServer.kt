@@ -390,7 +390,8 @@ class ControlServer(
         val svc = Services.byId(serviceId)
             ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Pick one of the services."))
 
-        AppLauncher.wakeScreen(context)
+        // A title sent to a sleeping TV turns it on: it is still on the wifi.
+        val woke = AppLauncher.wakeScreen(context)
 
         // Armed before launching, so no screen can appear before we look.
         // The title is only typed where the search link leaves the box empty,
@@ -434,6 +435,7 @@ class ControlServer(
                     JSONObject().put("ok", true).put("kind", kind).put("service", svc.name)
                         // The phone follows /api/autoplay; it never claims "playing" itself.
                         .put("autoplay", armed && autoplay != null)
+                        .put("woke", woke)
                         .put("state", store.snapshotJson(deviceId))
                 )
             }
