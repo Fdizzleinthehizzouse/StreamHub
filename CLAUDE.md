@@ -38,7 +38,7 @@ Do not "fix" these — they were investigated, most of them on the real TV.
    | Prime Video | `https://app.primevideo.com/search?phrase=…` | search results for the title |
    | Disney+ | `disneyplus://www.disneyplus.com/search` | empty search page; the accessibility helper types the title into `searchEditText` |
    | HBO Max | `https://play.max.com/search` | empty search page; `BlindPlay` types the title via the key helper (screen not readable) |
-   | Netflix | app home only | every search/title/watch link tried lands on home |
+   | Netflix | app home only | every search/title/watch link tried lands on home, including `nflx://…/search?q=` (kept across a cold start, lost at the profile pick). `BlindPlay` reaches its search by key presses instead |
 
 3. **Exact-title links need each service's content id.** TMDB does not expose
    them. Wikidata does, for part of the catalogue (see HANDOVER.md) — not wired in.
@@ -49,6 +49,14 @@ Do not "fix" these — they were investigated, most of them on the real TV.
    `state=3` = playing, and `description=` names what plays). HBO Max autoplay
    (`picker/BlindPlay.kt`) is therefore blind key presses, verified afterwards:
    the media session must name the title, else Back and report.
+7. **Netflix is never driven into playback.** It gives nothing to check
+   against at any point: its media session says `state=3` with no title for
+   the trailers on its own home screen, and playback shares MainActivity and
+   the same window as every other screen, so "playing the right thing",
+   "playing the wrong thing" and "sitting on a menu" are indistinguishable. A
+   version that pressed Play blind started the last thing watched instead of
+   the title asked for. `BlindPlay` now stops at Netflix's search results with
+   the title highlighted; Félix presses OK (chosen by him, 2026-09-20).
 6. **Accessibility clicks are not remote presses.** Prime Video ignored
    `ACTION_CLICK` on its highlighted tile (reported as delivered). Real key
    events work — see "Key presses" in HANDOVER.md.

@@ -269,11 +269,13 @@ object ProfilePickers {
     //  - While playing, the media session names it: "When You're Lost in the
     //    Darkness, The Last of Us" (episode, then show).
 
-    object Hbo {
-        const val SERVICE_ID = "hbomax"
-        const val SEARCH_LINK = "https://play.max.com/search"
-        /** The on-screen keyboard, row by row, six keys a row. */
-        private const val KEYBOARD = "abcdefghijklmnopqrstuvwxyz1234567890"
+    /**
+     * HBO Max's and Netflix's on-screen keyboards, which are laid out the same
+     * (both checked on the real TV): six keys a row, a-f / g-l / m-r / s-x /
+     * y z 1 2 3 4 / 5 6 7 8 9 0, with the results to the right of it.
+     */
+    object SearchKeyboard {
+        private const val KEYS = "abcdefghijklmnopqrstuvwxyz1234567890"
         private const val COLUMNS = 6
 
         /**
@@ -293,9 +295,43 @@ object ProfilePickers {
 
         /** Right presses from the key last typed to the first result; null if it isn't on the keyboard. */
         fun rightsToFirstResult(typed: String): Int? {
-            val i = KEYBOARD.indexOf(typed.lastOrNull() ?: return null)
+            val i = KEYS.indexOf(typed.lastOrNull() ?: return null)
             return if (i < 0) null else COLUMNS - i % COLUMNS
         }
+    }
+
+    object Hbo {
+        const val SERVICE_ID = "hbomax"
+        const val SEARCH_LINK = "https://play.max.com/search"
+    }
+
+    // ---- Netflix (blind, and it never says what it plays) ------------------
+    //
+    // Netflix shows nothing to accessibility and blocks screenshots, so this
+    // was mapped by pressing keys with Félix watching the TV (September 2026):
+    //  - a cold start always lands on "Who's watching?", a list top to bottom.
+    //    Up stops at the top (no wrap), so Up x5 then Down x(place-1) reaches
+    //    any profile without reading a single name.
+    //  - from the home screen, Left then Up x8 reaches the top menu bar on
+    //    "Home"; Left again is Search; OK opens it.
+    //  - typed keys land in the search box, but only slowly (see KeyServer).
+    //  - the keyboard is [SearchKeyboard]; Right from its last column enters
+    //    the first result. OK opens the title's page with Play highlighted.
+    //  - its media session reports state=3 for the trailers on its own menus
+    //    and never names anything, so nothing here can be verified. The phone
+    //    is told exactly that.
+
+    object Netflix {
+        const val SERVICE_ID = "netflix"
+        /** More than the profiles anyone has: Up stops at the top of the list. */
+        const val UPS_TO_FIRST_PROFILE = 5
+        const val MAX_PLACE = 5
+
+        /** Down presses from the top of the profile list to [place] (1-based), or null if out of range. */
+        fun downsToProfile(place: Int): Int? = if (place in 1..MAX_PLACE) place - 1 else null
+
+        /** "3" -> 3, for the place stored per phone. */
+        fun place(stored: String?): Int? = stored?.trim()?.toIntOrNull()?.takeIf { it in 1..MAX_PLACE }
     }
 
     /**

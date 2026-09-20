@@ -182,7 +182,7 @@ Fire TV):
 | **Prime Video** | **starts playing by itself** (with the TV helper and key helper on); otherwise its search results |
 | **Disney+** | **starts playing by itself**, in your profile (same); otherwise its search, filled in |
 | **HBO Max** | **starts playing by itself** (key helper on); otherwise its search page, where you type |
-| **Netflix** | its home screen. You find the title (the phone's remote pad works here) |
+| **Netflix** | **its search results, with the title highlighted** — you press OK on the phone. Otherwise its home screen |
 
 "Starts by itself" means the TV finds the exact title, opens it and presses
 Play, checking at every step that the highlight is on the right thing. Your
@@ -200,6 +200,22 @@ If that isn't your title it stops it straight away and tells you. A film must
 match by its exact name, so "Dune: Part Two" never passes for "Dune". The one
 thing it can't catch is two different films with the very same name: HBO
 Max's top result wins. Allow ~20 s (~35 s if HBO Max wasn't already open).
+
+**Netflix stops one press short, on purpose.** It closes and reopens Netflix
+(so it always starts at "Who's watching?"), picks your profile by counting
+down the list, opens Netflix's search, types the title and leaves the first
+result highlighted — about 50 s. Then you press OK on the phone's remote pad.
+
+It doesn't press Play itself because Netflix gives the TV nothing to check
+against: its screen can't be read, screenshots are blocked, and it reports
+"playing" with no title even for the trailers on its own home screen. An
+earlier version did press Play, and once started the last thing watched
+instead of the title asked for, with no way to notice. One press by you is
+worth more than that.
+
+For this, tell your phone **which place in Netflix's list your profile is**
+(Settings → Your profiles): its names can't be read, only counted. Without it,
+Netflix just opens as before.
 
 ---
 

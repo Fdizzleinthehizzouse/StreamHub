@@ -341,6 +341,14 @@ process.exit(0);
   await check('an exact title beats a longer one that merely contains it', () =>
     jvmTest('ProfilePickersTest.anExactNameBeatsALongerOneThatContainsIt'));
 
+  // Netflix's profile screen can't be read, so it is counted down by place.
+  await check('Netflix profiles are picked by place, and only a real place counts', () =>
+    jvmTest('ProfilePickersTest.netflixIgnoresAPlaceThatIsNotOne'));
+
+  // Closing an app is not a key press: only Netflix may be restarted.
+  await check('the key helper may close Netflix and nothing else', () =>
+    jvmTest('KeyServerTest.onlyNetflixMayBeClosed'));
+
   // HBO Max is driven blind; only the media session proves what started.
   await check('HBO Max: only the wanted title counts as playing ("Dune: Part Two" is not "Dune")', () =>
     jvmTest('ProfilePickersTest.whatIsPlayingMustNameTheTitle'));

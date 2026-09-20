@@ -362,15 +362,16 @@ class ControlServer(
         // The year tells same-named titles apart ("Road House" 1989 / 2024).
         // Never autoplay what isn't included in the subscription: on a rental,
         // OK could land on Rent or Buy.
-        // HBO Max's screen can't be read: BlindPlay drives it blind and checks
-        // what the TV says is playing afterwards.
-        val blind = BlindPlay.canAutoplay(serviceId)
+        // HBO Max's and Netflix's screens can't be read: BlindPlay drives them
+        // by key presses, and checks afterwards as far as each service allows.
+        val netflixPlace = ProfilePickers.Netflix.place(store.profileNames(deviceId)[ProfilePickers.Netflix.SERVICE_ID])
+        val blind = BlindPlay.canAutoplay(serviceId, netflixPlace)
         val autoplay = titleText?.takeIf { blind || (ProfilePickerService.canAutoplay(serviceId) && TvKeys.helperRunning()) }
             ?.takeIf { item != null && includedOn(serviceId, Title.fromJson(item)) }
             ?.let { ProfilePickers.Wanted(it, item?.optIntOrNull("year"), isMovie = item?.optString("mediaType") == "movie") }
         val relaunch = { main.post { AppLauncher.launch(context, serviceId, titleText, contentId) }; Unit }
         val armed = if (blind && autoplay != null) {
-            BlindPlay.start(deviceId, autoplay)
+            BlindPlay.start(deviceId, serviceId, autoplay, netflixPlace)
         } else {
             ProfilePickerService.arm(serviceId, deviceId, store.profileNames(deviceId)[serviceId], typed, autoplay, relaunch)
         }
@@ -451,12 +452,16 @@ class ControlServer(
      * Only services with a recognizer are offered; the others cannot work.
      */
     private fun doProfiles(session: IHTTPSession, deviceId: String): Response {
+        val netflix = ProfilePickers.Netflix.SERVICE_ID
         if (session.method == Method.POST) {
             val given = readBody(session).optJSONObject("profiles") ?: JSONObject()
             val names = ProfilePickers.ALL.associate { p ->
                 p.serviceId to given.optString(p.serviceId, "").trim().take(60)
-            }.filterValues { it.isNotEmpty() }
-            store.setProfileNames(deviceId, names)
+            }.toMutableMap()
+            // Netflix's profile names can't be read, so this phone's is kept as
+            // its place in the list - a number, or nothing.
+            names[netflix] = ProfilePickers.Netflix.place(given.optString(netflix, ""))?.toString() ?: ""
+            store.setProfileNames(deviceId, names.filterValues { it.isNotEmpty() })
         }
         val names = store.profileNames(deviceId)
         val services = JSONArray()
@@ -465,9 +470,18 @@ class ControlServer(
                 JSONObject()
                     .put("id", p.serviceId)
                     .put("name", Services.byId(p.serviceId)?.name ?: p.serviceId)
+                    .put("kind", "name")
                     .put("profile", names[p.serviceId] ?: "")
             )
         }
+        services.put(
+            JSONObject()
+                .put("id", netflix)
+                .put("name", Services.byId(netflix)?.name ?: netflix)
+                .put("kind", "place")
+                .put("places", ProfilePickers.Netflix.MAX_PLACE)
+                .put("profile", names[netflix] ?: "")
+        )
         return json(
             Response.Status.OK,
             JSONObject()

@@ -74,6 +74,7 @@ object KeyServer {
                             line == NOW_PLAYING -> nowPlaying()
                             line == FRONT -> frontFrom(dumpsys("window", "windows")) ?: ""
                             line.startsWith("$RUNNING ") -> running(line.removePrefix("$RUNNING "))
+                            line.startsWith("$STOP_APP ") -> stopApp(line.removePrefix("$STOP_APP "))
                             line.startsWith("$TYPE ") -> if (type(inject, line.removePrefix("$TYPE "))) "ok" else "no"
                             else -> {
                                 val code = KEYS[line]
@@ -92,10 +93,13 @@ object KeyServer {
      * Read-only: this helper's version. A helper started before StreamHub was
      * updated keeps running the old code (and answers "no" to this), so
      * StreamHub checks before relying on anything newer than key presses.
-     * 2 added typing, NOWPLAYING, FRONT and RUNNING.
+     * 2 added typing, NOWPLAYING, FRONT and RUNNING. 3 types slowly and adds
+     * STOPAPP (Netflix only).
      */
     const val VERSION = "VERSION"
-    const val HELPER_VERSION = 2
+    const val HELPER_VERSION = 3
+    /** "STOPAPP <package>": force-stops a package in [STOPPABLE]. */
+    const val STOP_APP = "STOPAPP"
 
     /** Read-only: which apps' media sessions are playing. */
     const val PLAYING = "PLAYING"
@@ -140,12 +144,36 @@ object KeyServer {
         return if (p.inputStream.bufferedReader().readText().trim().isNotEmpty()) "yes" else "no"
     }
 
+    /**
+     * One character at a time, with a pause: Netflix dropped letters typed at
+     * full speed ("wednesday" arrived as "wededy" on the real TV).
+     */
     private fun type(inject: (InputEvent) -> Boolean, text: String): Boolean {
         if (!TYPEABLE.matches(text)) return false
-        val events = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD).getEvents(text.toCharArray()) ?: return false
-        // As the `input text` command does: fresh timestamps, from a keyboard.
-        val now = SystemClock.uptimeMillis()
-        return events.all { e -> inject(KeyEvent.changeTimeRepeat(e, now, 0).apply { source = InputDevice.SOURCE_KEYBOARD }) }
+        val map = KeyCharacterMap.load(KeyCharacterMap.VIRTUAL_KEYBOARD)
+        for (c in text) {
+            val events = map.getEvents(charArrayOf(c)) ?: return false
+            // As the `input text` command does: fresh timestamps, from a keyboard.
+            val now = SystemClock.uptimeMillis()
+            if (!events.all { e -> inject(KeyEvent.changeTimeRepeat(e, now, 0).apply { source = InputDevice.SOURCE_KEYBOARD }) }) return false
+            Thread.sleep(TYPE_GAP_MS)
+        }
+        return true
+    }
+
+    private const val TYPE_GAP_MS = 150L
+
+    /**
+     * Closes Netflix, so the next launch starts from its profile screen: its
+     * screen can't be read, and an app already open could be anywhere. Only
+     * Netflix may be closed this way.
+     */
+    val STOPPABLE = setOf("com.netflix.ninja")
+
+    private fun stopApp(pkg: String): String {
+        if (pkg !in STOPPABLE) return "no"
+        ProcessBuilder("am", "force-stop", pkg).redirectErrorStream(true).start().waitFor()
+        return "ok"
     }
 
     /**

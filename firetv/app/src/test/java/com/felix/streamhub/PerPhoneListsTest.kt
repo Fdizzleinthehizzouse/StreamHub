@@ -76,7 +76,12 @@ class PerPhoneListsTest {
         val phoneA = pair(DEVICE_A)
         val phoneB = pair(DEVICE_B)
 
-        val (status, _) = call("POST", "/api/profiles", phoneA, """{"profiles":{"disneyplus":"Alice","netflix":"Alice"}}""")
+        // Netflix is kept as a place in its list, never a name: its profile
+        // screen can't be read, so a name would be worthless.
+        val (status, _) = call(
+            "POST", "/api/profiles", phoneA,
+            """{"profiles":{"disneyplus":"Alice","netflix":"Alice","primevideo":""}}"""
+        )
         assertEquals(200, status)
 
         val a = JSONObject(call("GET", "/api/profiles", phoneA).second)
@@ -85,7 +90,12 @@ class PerPhoneListsTest {
         assertEquals(true, a.getBoolean("asked"))
         assertEquals("", profileFor(b, "disneyplus"))
         assertEquals(false, b.getBoolean("asked"))
-        assertFalse("netflix cannot be auto-picked, so it is not offered", a.toString().contains("netflix"))
+        assertEquals("", profileFor(a, "netflix"))
+
+        assertEquals(200, call("POST", "/api/profiles", phoneA, """{"profiles":{"netflix":"4"}}""").first)
+        val a2 = JSONObject(call("GET", "/api/profiles", phoneA).second)
+        assertEquals("4", profileFor(a2, "netflix"))
+        assertEquals("", profileFor(b, "netflix"))
     }
 
     /** The phone's fetch() sends `application/json` with no charset. */

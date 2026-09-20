@@ -20,7 +20,7 @@ class ProfilePickersTest {
 
     @Test
     fun hboIsTypedOnlyWhatItsKeyboardHas() {
-        val hbo = ProfilePickers.Hbo
+        val hbo = ProfilePickers.SearchKeyboard
         assertEquals("house of the dragon", hbo.searchText("House of the Dragon"))
         assertEquals("greys anatomy", hbo.searchText("Grey’s Anatomy"))
         assertEquals("pokemon the movie", hbo.searchText("Pokémon: The Movie!"))
@@ -33,11 +33,11 @@ class ProfilePickersTest {
         // Seen on the TV: after "house of the dragon" the highlight sat on "n"
         // (2nd column) and 5 Rights reached the first result; after "the last
         // of us" it sat on "s" (1st column), 6 Rights.
-        assertEquals(5, ProfilePickers.Hbo.rightsToFirstResult("house of the dragon"))
-        assertEquals(6, ProfilePickers.Hbo.rightsToFirstResult("the last of us"))
-        assertEquals(4, ProfilePickers.Hbo.rightsToFirstResult("1917")) // "7": 3rd key of "5 6 7 8 9 0"
-        assertEquals(1, ProfilePickers.Hbo.rightsToFirstResult("catch 22 4")) // "4" ends a row
-        assertEquals(null, ProfilePickers.Hbo.rightsToFirstResult(""))
+        assertEquals(5, ProfilePickers.SearchKeyboard.rightsToFirstResult("house of the dragon"))
+        assertEquals(6, ProfilePickers.SearchKeyboard.rightsToFirstResult("the last of us"))
+        assertEquals(4, ProfilePickers.SearchKeyboard.rightsToFirstResult("1917")) // "7": 3rd key of "5 6 7 8 9 0"
+        assertEquals(1, ProfilePickers.SearchKeyboard.rightsToFirstResult("catch 22 4")) // "4" ends a row
+        assertEquals(null, ProfilePickers.SearchKeyboard.rightsToFirstResult(""))
     }
 
     @Test
@@ -50,6 +50,30 @@ class ProfilePickersTest {
         // Films: HBO names a film alone, so a longer name is another film.
         assertTrue(ProfilePickers.namesTitle("Dune", "Dune", isMovie = true))
         assertTrue(!ProfilePickers.namesTitle("Dune: Part Two", "Dune", isMovie = true))
+    }
+
+    // ---- Netflix (blind, by place in the list) ---------------------------
+
+    @Test
+    fun netflixCountsDownToTheProfileWhosePlaceIsKnown() {
+        val n = ProfilePickers.Netflix
+        assertEquals(0, n.downsToProfile(1))
+        assertEquals(3, n.downsToProfile(4))
+        assertEquals(null, n.downsToProfile(0))
+        assertEquals(null, n.downsToProfile(6))
+        // Up must be pressed more often than anyone has profiles, because it
+        // stops at the top of the list instead of wrapping round.
+        assertTrue(n.UPS_TO_FIRST_PROFILE >= n.MAX_PLACE)
+    }
+
+    @Test
+    fun netflixIgnoresAPlaceThatIsNotOne() {
+        val n = ProfilePickers.Netflix
+        assertEquals(4, n.place(" 4 "))
+        assertEquals(null, n.place(""))
+        assertEquals(null, n.place(null))
+        assertEquals(null, n.place("Félix")) // its names can't be read, so a name is no use
+        assertEquals(null, n.place("9"))
     }
 
     // ---- Disney+ ---------------------------------------------------------

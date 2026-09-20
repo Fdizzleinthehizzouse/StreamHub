@@ -61,6 +61,32 @@ Gotchas that cost time:
 - Git Bash mangles `/sdcard/...` in `adb pull`: use `//sdcard/...`.
 - `dumps/tree.js file.xml` prints a uiautomator dump as an indented tree.
 
+## Update — 2026-09-20: Netflix, as far as it can honestly go
+
+Netflix now opens its **search results with the title highlighted**, and Félix
+presses OK. Verified live end to end (Wednesday, ~50 s from the phone).
+
+- **Its profile is picked by place, not name** (nothing on its screen can be
+  read). Stored per phone like the other profile settings, as a number; the
+  phone shows a "1st…5th in the list" picker. Mapped with Félix watching the
+  TV: the picker is a vertical list, **Up stops at the top** (no wrap), so
+  Up x5 then Down x(place-1) lands anywhere without reading a name.
+- **Route to search**: from home, Left, Up x8 (reaches the top menu on "Home"),
+  Left (Search), OK. Its keyboard is HBO Max's, so `SearchKeyboard` is shared,
+  and Right from the last-typed key enters the first result.
+- **Typing must be slow.** At full speed "wednesday" arrived as "wededy", so
+  the key helper now types one character at a time (150 ms apart, v3).
+- **Netflix is restarted first** (`STOPAPP`, helper v3, Netflix only): an app
+  already open could be on any screen, and no screen here can be read.
+- **Why it stops short — and a real failure.** The first version pressed Play.
+  It started *the last thing watched* instead of the title, because the home
+  screen wasn't ready and OK landed on its banner; nothing could detect that.
+  Checked and rejected as signals: `nflx://…/search?q=` (lost at the profile
+  pick), `android.intent.action.SEARCH` (not resolvable), the resumed activity
+  and window (MainActivity for every screen, playback included), and the media
+  session (`state=3`, no title, same for home-screen trailers). See constraint
+  7 in CLAUDE.md. Do not "improve" this into pressing Play.
+
 ## Update — evening of 2026-09-19: all three readable/driveable services autoplay
 
 Verified live, each from a cold start: Prime Video (Road House 2024, ~21 s),

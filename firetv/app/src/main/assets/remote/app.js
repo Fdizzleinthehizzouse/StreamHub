@@ -135,7 +135,13 @@ function showPairing(message) {
 
 /* ---------------------------------------------------------------- profiles */
 
-/** One field per service the TV can pick a profile on. */
+const PLACES = ['1st', '2nd', '3rd', '4th', '5th'];
+
+/**
+ * One field per service the TV can pick a profile on. Netflix is the odd one:
+ * its profile names can't be read, so the TV counts down the list instead and
+ * this asks which place is yours.
+ */
 function renderProfileFields(box, note, data) {
   box.replaceChildren(
     ...data.services.map((s) =>
@@ -143,29 +149,42 @@ function renderProfileFields(box, note, data) {
         'label',
         {},
         s.name,
-        el('input', {
-          class: 'setting-input',
-          type: 'text',
-          maxlength: '60',
-          autocapitalize: 'words',
-          autocorrect: 'off',
-          spellcheck: 'false',
-          placeholder: 'Your profile name, exactly as shown',
-          value: s.profile || '',
-          'data-service': s.id,
-        })
+        s.kind === 'place'
+          ? el(
+              'select',
+              { class: 'setting-input', 'data-service': s.id },
+              el('option', { value: '' }, 'Choose it with the remote'),
+              ...PLACES.slice(0, s.places || 5).map((label, i) =>
+                el(
+                  'option',
+                  Object.assign({ value: String(i + 1) }, String(i + 1) === String(s.profile) ? { selected: 'selected' } : {}),
+                  `${label} in the list`
+                )
+              )
+            )
+          : el('input', {
+              class: 'setting-input',
+              type: 'text',
+              maxlength: '60',
+              autocapitalize: 'words',
+              autocorrect: 'off',
+              spellcheck: 'false',
+              placeholder: 'Your profile name, exactly as shown',
+              value: s.profile || '',
+              'data-service': s.id,
+            })
       )
     )
   );
-  // Say plainly which services cannot do this, and whether the TV can yet.
+  // Say plainly what each field does, and whether the TV can do it yet.
   note.textContent =
-    'Netflix and HBO Max don’t let other apps read their profile screen, so you’ll still choose those with the remote.' +
+    'Disney+ and Prime Video are picked by name. Netflix hides its screen from other apps, so the TV counts from the top of its list instead — tell it which place is yours. HBO Max skipped its profile screen on this TV.' +
     (data.enabled ? '' : ' This also needs a one-time setup on the TV before it works.');
 }
 
 function readProfileFields(box) {
   const out = {};
-  box.querySelectorAll('input[data-service]').forEach((i) => {
+  box.querySelectorAll('[data-service]').forEach((i) => {
     out[i.dataset.service] = i.value.trim();
   });
   return out;
@@ -866,7 +885,10 @@ async function followAutoplay(service, title) {
       return toast(s.message && s.message !== 'Playing' ? `▶ ${service}: ${s.message}` : `▶ Playing “${title}” on ${service}`);
     }
     if (s.state === 'stopped') return toast(`${service}: ${s.message}`, true);
-    if (s.state === 'done' || s.state === 'none') return;
+    // "done" is as far as the TV goes on its own (Netflix: the results, with
+    // the title highlighted). Say so — staying silent read as a failure.
+    if (s.state === 'done') return toast(s.message || `${service}: ready on the TV`);
+    if (s.state === 'none') return;
     if (s.message && s.message !== last) {
       last = s.message;
       toast(`${service}: ${s.message}…`);

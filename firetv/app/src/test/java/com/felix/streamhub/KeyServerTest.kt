@@ -106,6 +106,13 @@ class KeyServerTest {
     }
 
     @Test
+    fun onlyNetflixMayBeClosed() {
+        // Closing an app is the one thing here that isn't a key press: Netflix
+        // has to be restarted to land on a screen the TV can predict.
+        assertEquals(setOf("com.netflix.ninja"), KeyServer.STOPPABLE)
+    }
+
+    @Test
     fun onlyFixedKeysExist() {
         assertEquals(setOf("UP", "DOWN", "LEFT", "RIGHT", "OK", "BACK", "HOME", "PLAYPAUSE"), KeyServer.KEYS.keys)
         assertEquals(KeyServer.KEYS.keys, TvKeys.Key.values().map { it.name }.toSet())

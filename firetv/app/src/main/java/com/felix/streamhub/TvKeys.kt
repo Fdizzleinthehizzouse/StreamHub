@@ -88,6 +88,9 @@ object TvKeys {
         else -> Result.Unavailable("The TV didn’t take the typing.")
     }
 
+    /** Closes [pkg] (Netflix only, see KeyServer.STOPPABLE). */
+    fun stopApp(pkg: String): Boolean = ask("${KeyServer.STOP_APP} $pkg") == "ok"
+
     /** One request, one reply line; null if the helper isn't there. */
     @Synchronized
     private fun ask(line: String): String? {
