@@ -82,18 +82,27 @@ class ProfilePickerService : AccessibilityService() {
         val now = System.currentTimeMillis()
         if (now > job.until) {
             armed = null
-            job.stop(job.waitingFor ?: "nothing to do")
+            // Not "nothing to do": on a real TV that was all the phone got
+            // when Disney+ never showed a screen this knows.
+            job.stop(job.waitingFor ?: "${serviceName(job.serviceId)} never showed its profiles, its search or the title")
             Log.i(TAG, "${job.serviceId}: gave up after ${ARM_MS / 1000}s: ${job.waitingFor}")
             return false
         }
 
         // Playback confirmation needs no screen: the media session says it.
         if (job.playPressedAt != 0L) {
+            val expect = job.expectName
+            if (expect != null) return confirmEpisode(job, expect, now)
             val playing = TvKeys.playing()
             if (playing != null && playing.any { it in job.picker.packages }) {
                 armed = null
-                job.report(State.PLAYING, "Playing")
-                Log.i(TAG, "${job.serviceId}: playing")
+                // "Playing Season 2, Episode 5", or for Continue what the
+                // service's own button said: "Playing — Resume Episode 4".
+                val message = job.autoplay?.episode?.let { "Playing ${it.label}" }
+                    ?: job.playLabel?.let { "Playing — $it" }
+                    ?: "Playing"
+                job.report(State.PLAYING, message)
+                Log.i(TAG, "${job.serviceId}: $message")
                 return false
             }
             if (now - job.playPressedAt > PLAY_CONFIRM_MS) {
@@ -208,9 +217,17 @@ class ProfilePickerService : AccessibilityService() {
             return true
         }
 
+        // A chosen episode: the page was confirmed below, and moving down it
+        // scrolls the name and Play button away, so it isn't checked again.
+        wanted.episode?.let { ep -> if (job.pageConfirmed) return chooseEpisode(job, tree, ep, now) }
+
         job.waitingFor = "the title’s page didn’t show a Play button"
         val play = playButton(tree) as Live?
-        if (play == null) {
+        // A chosen episode needs the page, not its Play button, which Prime
+        // drops when it counts the current episode as watched (seen on the TV).
+        val onPage = play != null || (wanted.episode != null || job.picker.noResume?.invoke(tree) == true) &&
+            job.picker.onTitlePage?.invoke(tree) == true
+        if (!onPage) {
             // Say what's on screen now and then, so a stall can be diagnosed from logcat.
             if (now - job.lastWaitLog > WAIT_LOG_MS) {
                 job.lastWaitLog = now
@@ -242,10 +259,214 @@ class ProfilePickerService : AccessibilityService() {
                 return false
             }
         }
+        wanted.episode?.let { ep ->
+            job.pageConfirmed = true
+            job.pageConfirmedAt = now
+            job.report(State.WORKING, "Finding ${ep.label}")
+            return chooseEpisode(job, tree, ep, now)
+        }
+        // Continue: the page's own Play is the service's Resume / Continue.
+        if (play == null) {
+            // Only "Watch from beginning" on offer. That isn't continuing, so
+            // it isn't pressed; the phone is told what to do instead. A moment
+            // first, in case the page is still drawing its buttons.
+            if (job.noResumeSince == 0L) job.noResumeSince = now
+            if (now - job.noResumeSince < PAGE_YEAR_WAIT_MS) return true
+            armed = null
+            job.stop("it isn’t offering to continue “${title}”, only to watch an episode from the beginning. Choose the episode under Episodes instead")
+            return false
+        }
+        // What it says it resumes is passed on, so the phone can tell you.
+        job.playLabel = job.picker.playLabel?.invoke(tree)
         if (!select(play)) { armed = null; job.stop("couldn’t get the highlight onto Play"); return false }
         job.playPressedAt = now
         job.report(State.WORKING, "Starting “${title}”")
         return true
+    }
+
+    /**
+     * On a series' page, confirmed to be the right one: get the highlight to
+     * [ep] and start it. One step per look, each decided from the screen as
+     * it is now, so nothing is pressed on a guess; OK only once the
+     * highlighted card itself says it is that season and episode.
+     * @return true to keep looking.
+     */
+    private fun chooseEpisode(job: Job, tree: ProfilePickers.Node, ep: ProfilePickers.Episode, now: Long): Boolean {
+        val service = serviceName(job.serviceId)
+        fun give(why: String): Boolean {
+            armed = null
+            job.stop(why)
+            // As for a missing profile: the screen, one line per entry, so a
+            // redesign can be fixed from logcat alone.
+            Log.w(TAG, "${job.serviceId}: gave up on ${ep.label}. Screen:")
+            describe(tree).lineSequence().forEach { Log.w(TAG, it) }
+            return false
+        }
+        val list = job.picker.episodes ?: return give("$service can’t be sent to one episode")
+        // Let the last press land (Prime's season list takes a moment to close).
+        if (now < job.waitUntil) return true
+        if (++job.episodeLooks > MAX_EPISODE_LOOKS) return give("couldn’t reach ${ep.label} in $service’s list")
+
+        // 1. The right season listed.
+        val offered = list.seasons(tree)
+        val shown = list.seasonShown(tree)
+        val cardsNow = list.cards(tree)
+        Log.i(
+            TAG,
+            "${job.serviceId}: episode look ${job.episodeLooks}: season shown=$shown offered=${offered.map { "${it.season}${if (it.highlighted) "*" else ""}" }} " +
+                "opener=${list.seasonOpener?.invoke(tree) != null} cards=${cardsNow.map { "${it.season}x${it.episode}${if (it.highlighted) "*" else ""}" }} " +
+                "focus=${findFocus(AccessibilityNodeInfo.FOCUS_INPUT)?.let { "${it.viewIdResourceName} \"${it.contentDescription}\"" }}"
+        )
+        // Another of the page's tabs showing: back to Episodes first.
+        list.episodesTab?.invoke(tree)?.let { (tab, showing) ->
+            if (!showing) {
+                job.waitingFor = "couldn’t get back to the Episodes tab"
+                val live = (tab as Live).info
+                if (live.isFocused) {
+                    if (!press(job, TvKeys.Key.OK)) return false
+                } else if (!focusOn(live, keysOnly = true)) {
+                    return give("couldn’t get the highlight onto $service’s Episodes tab")
+                }
+                job.waitUntil = now + NUDGE_SETTLE_MS
+                return true
+            }
+        }
+        if (shown != ep.season) {
+            job.waitingFor = "couldn’t switch to Season ${ep.season}"
+            if (offered.isNotEmpty()) {
+                val target = offered.firstOrNull { it.season == ep.season }
+                    ?: return give("$service has no Season ${ep.season} of “${job.autoplay?.title}”")
+                if (list.seasonOpener == null) {
+                    // Disney+: highlighting a season lists its episodes. Its
+                    // highlight there and the season still not listed, a few
+                    // looks running, means the list isn't following: stop.
+                    if (target.highlighted && ++job.seasonStuck >= STUCK_LOOKS) {
+                        return give("the highlight is on Season ${ep.season}, but $service still lists another season")
+                    }
+                    if (!focusOn((target.node as Live).info, keysOnly = true)) return give("couldn’t get the highlight onto Season ${ep.season}")
+                    job.waitUntil = now + NUDGE_SETTLE_MS
+                    return true
+                }
+                // Prime Video's open list shows its highlight as `selected`.
+                val at = offered.indexOfFirst { it.highlighted }
+                if (at < 0) return true // still drawing
+                val arrow = ProfilePickers.arrowToward(at, offered.indexOf(target), horizontal = false)
+                if (!press(job, arrow?.let(::keyOf) ?: TvKeys.Key.OK)) return false
+                if (arrow == null) job.waitUntil = now + LIST_CLOSE_MS
+                return true
+            }
+            list.seasonOpener?.invoke(tree)?.let { opener ->
+                if (!select(opener as Live, keysOnly = true)) return give("couldn’t open $service’s list of seasons")
+                job.waitUntil = now + LIST_CLOSE_MS
+                return true
+            }
+            return nudgeDown(job, now, "the seasons")
+        }
+
+        // 2. The episode.
+        job.waitingFor = "couldn’t find ${ep.label}"
+        val cards = list.cards(tree).filter { it.season == ep.season }
+        if (cards.isEmpty()) return nudgeDown(job, now, "the episodes")
+        cards.firstOrNull { it.episode == ep.number }?.let { card ->
+            if (!select(card.node as Live, keysOnly = true)) return give("couldn’t get the highlight onto ${ep.label}")
+            job.playPressedAt = now
+            if (list.sessionNamesEpisode) {
+                job.expectName = card.name
+                job.sessionBefore = TvKeys.nowPlaying()?.firstOrNull { it.first in job.picker.packages }
+            }
+            job.report(State.WORKING, "Starting ${ep.label}")
+            Log.i(TAG, "${job.serviceId}: pressed OK on \"${card.node.desc}\"")
+            return true
+        }
+        // Not on screen: walk the list towards it.
+        val at = cards.firstOrNull { it.highlighted }
+        if (at == null) {
+            // On a season, beside the episodes (Disney+): step across.
+            val across = list.intoEpisodesFromSeasons
+            if (across != null && offered.any { it.highlighted }) {
+                job.waitUntil = now + NUDGE_SETTLE_MS
+                return press(job, keyOf(across))
+            }
+            val nearest = cards.minByOrNull { Math.abs(it.episode!! - ep.number) }!!
+            if (!focusOn((nearest.node as Live).info, keysOnly = true)) return give("couldn’t get the highlight into $service’s episodes")
+            return true
+        }
+        // The highlight no longer moves: the end of the list, or the service
+        // not taking the key. Either way, say where it stopped - not a guess
+        // at which.
+        if (at.episode == job.lastEpisodeAt) {
+            if (++job.stuck >= STUCK_LOOKS) {
+                return give("the highlight stopped at Season ${ep.season}, Episode ${at.episode} in $service’s list, short of Episode ${ep.number}")
+            }
+        } else {
+            job.stuck = 0
+            job.lastEpisodeAt = at.episode
+        }
+        val arrow = ProfilePickers.arrowToward(at.episode!!, ep.number, list.horizontal) ?: return true
+        job.waitUntil = now + STEP_SETTLE_MS
+        return press(job, keyOf(arrow))
+    }
+
+    /**
+     * The media session must name the episode whose card was pressed. The
+     * one that was playing before, still reporting, is waited out; anything
+     * else is the wrong thing, and is stopped.
+     */
+    private fun confirmEpisode(job: Job, expect: String, now: Long): Boolean {
+        val ep = job.autoplay?.episode
+        val service = serviceName(job.serviceId)
+        val playing = TvKeys.nowPlaying()?.firstOrNull { it.first in job.picker.packages }
+        when {
+            playing == null || playing == job.sessionBefore || playing.second.isBlank() -> Unit
+            ProfilePickers.namesTitle(playing.second, expect) -> {
+                armed = null
+                // Prime quotes some names itself: "\"Nothing Like it in the World\"".
+                job.report(State.PLAYING, "Playing ${ep?.label}: “${playing.second.trim('"', '“', '”', ' ')}”")
+                Log.i(TAG, "${job.serviceId}: playing \"${playing.second}\"")
+                return false
+            }
+            else -> {
+                armed = null
+                TvKeys.press(TvKeys.Key.BACK)
+                job.stop("$service started “${playing.second}”, not ${ep?.label} (“$expect”), so it was stopped")
+                return false
+            }
+        }
+        if (now - job.playPressedAt > PLAY_CONFIRM_MS) {
+            armed = null
+            job.stop("pressed OK on ${ep?.label}, but $service didn’t say it started")
+            return false
+        }
+        return true
+    }
+
+    /** The list isn't on screen yet: it is further down the page. Down only - never OK. */
+    private fun nudgeDown(job: Job, now: Long, what: String): Boolean {
+        // Seen on the TV: Prime drew the page's name and Play button seconds
+        // before anything below them, and Down pressed into that half-drawn
+        // page carried the highlight past the episodes. Give it time first.
+        if (now - job.pageConfirmedAt < PAGE_SETTLE_MS) return true
+        if (++job.nudges > MAX_NUDGES) {
+            armed = null
+            job.stop("couldn’t find $what on the page of “${job.autoplay?.title}”")
+            return false
+        }
+        job.waitUntil = now + NUDGE_SETTLE_MS
+        return press(job, TvKeys.Key.DOWN)
+    }
+
+    private fun press(job: Job, key: TvKeys.Key): Boolean {
+        if (TvKeys.press(key) == TvKeys.Result.Pressed) return true
+        armed = null
+        job.stop("the TV didn’t take the ${key.name.lowercase()} press")
+        return false
+    }
+
+    private fun keyOf(a: ProfilePickers.Arrow) = when (a) {
+        ProfilePickers.Arrow.UP -> TvKeys.Key.UP
+        ProfilePickers.Arrow.DOWN -> TvKeys.Key.DOWN
+        ProfilePickers.Arrow.LEFT -> TvKeys.Key.LEFT
+        ProfilePickers.Arrow.RIGHT -> TvKeys.Key.RIGHT
     }
 
     /**
@@ -302,8 +523,8 @@ class ProfilePickerService : AccessibilityService() {
      * Get the highlight onto [node], confirm it's there, then press OK.
      * @return false, with nothing pressed, if the highlight didn't land.
      */
-    private fun select(node: Live): Boolean {
-        if (!focusOn(node.info)) {
+    private fun select(node: Live, keysOnly: Boolean = false): Boolean {
+        if (!focusOn(node.info, keysOnly)) {
             Log.w(TAG, "highlight did not land on ${node.info.viewIdResourceName} \"${node.info.contentDescription}\"")
             return false
         }
@@ -317,10 +538,16 @@ class ProfilePickerService : AccessibilityService() {
      * each one. Nothing is pressed except arrows; bounded; gives up if the
      * highlight stops moving.
      */
-    private fun focusOn(target: AccessibilityNodeInfo): Boolean {
+    private fun focusOn(target: AccessibilityNodeInfo, keysOnly: Boolean = false): Boolean {
         if (focusedOn(target, 1)) return true
-        target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-        if (focusedOn(target, SETTLE_TRIES)) return true
+        // keysOnly: seen on the TV, Disney+ let ACTION_FOCUS put its highlight
+        // on an episode at the bottom of its page, but then ignored Down from
+        // there - the page never scrolled. Moved by arrows, as a remote would,
+        // its lists behave.
+        if (!keysOnly) {
+            target.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            if (focusedOn(target, SETTLE_TRIES)) return true
+        }
 
         var lastBounds: Rect? = null
         repeat(MAX_STEPS) {
@@ -376,6 +603,8 @@ class ProfilePickerService : AccessibilityService() {
         override val desc get() = info.contentDescription?.toString() ?: ""
         override val viewId get() = info.viewIdResourceName ?: ""
         override val clickable get() = info.isClickable
+        override val focused get() = info.isFocused
+        override val selected get() = info.isSelected
         override val bounds: List<Int> by lazy {
             val r = Rect().also { info.getBoundsInScreen(it) }
             listOf(r.left, r.top, r.right, r.bottom)
@@ -435,6 +664,21 @@ class ProfilePickerService : AccessibilityService() {
         var tileOpened = false
         var playPressedAt = 0L
         var waitingFor: String? = null
+        /** What the page's Play button says it resumes ("Resume Episode 8"). */
+        var playLabel: String? = null
+        // A chosen episode (see chooseEpisode).
+        var pageConfirmed = false
+        var pageConfirmedAt = 0L
+        var noResumeSince = 0L
+        var waitUntil = 0L
+        var episodeLooks = 0
+        var nudges = 0
+        var lastEpisodeAt: Int? = null
+        var stuck = 0
+        var seasonStuck = 0
+        /** The service's own name for the episode pressed, to find in the media session. */
+        var expectName: String? = null
+        var sessionBefore: Pair<String, String>? = null
 
         fun report(state: State, message: String) {
             status = Status(deviceId, serviceId, autoplay?.title ?: query, state, message)
@@ -461,6 +705,16 @@ class ProfilePickerService : AccessibilityService() {
         private const val PLAY_CONFIRM_MS = 20_000L
         private const val SETTLE_TRIES = 8
         private const val SETTLE_MS = 150L
+        /** Walking to an episode: a season of 25 plus the moves around it. */
+        private const val MAX_EPISODE_LOOKS = 80
+        private const val MAX_NUDGES = 5
+        private const val NUDGE_SETTLE_MS = 800L
+        private const val PAGE_SETTLE_MS = 3_000L
+        private const val STEP_SETTLE_MS = 400L
+        private const val STUCK_LOOKS = 3
+        private const val LIST_CLOSE_MS = 1_500L
+        /** Finding an episode adds up to this to [ARM_MS]. */
+        const val EPISODE_EXTRA_MS = 60_000L
         /** Matches no profile: asks recognise only "is this the picker?". */
         private const val NO_NAME = "__streamhub: no profile name__"
 
@@ -525,7 +779,11 @@ class ProfilePickerService : AccessibilityService() {
             val q = query?.takeIf { it.isNotBlank() && picker.searchBox != null }
             val a = autoplay?.takeIf { it.title.isNotBlank() && canAutoplay(serviceId) }
             if (name == null && q == null && a == null) return false
-            val job = Job(picker, serviceId, deviceId, name, q, a, relaunch, System.currentTimeMillis() + ARM_MS)
+            // An episode in a service that can't list them is refused here,
+            // not half-done: the phone is told, and nothing is opened blind.
+            if (autoplay?.episode != null && (a == null || picker.episodes == null)) return false
+            val until = System.currentTimeMillis() + ARM_MS + if (a?.episode != null) EPISODE_EXTRA_MS else 0L
+            val job = Job(picker, serviceId, deviceId, name, q, a, relaunch, until)
             job.report(State.WORKING, if (a != null) "Looking for “${a.title}”" else "Working")
             armed = job
             running?.startPolling()

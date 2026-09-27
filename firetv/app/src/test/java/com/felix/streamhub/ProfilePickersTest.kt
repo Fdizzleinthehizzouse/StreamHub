@@ -342,6 +342,155 @@ class ProfilePickersTest {
         assertEquals(ProfilePickers.Settle.Decision.KeepLooking, settle.next(Outcome.NoSuchProfile))
     }
 
+    // ---- continue, and one chosen episode ------------------------------------
+    //
+    // Screens from the real TV on 2026-09-27: The Boys on Prime Video (5
+    // seasons), The Mandalorian on Disney+ (3 seasons).
+
+    private fun ProfilePickers.Picker.list() = episodes!!
+    private fun List<ProfilePickers.Listed>.eps() = map { "${it.season}x${it.episode}" }
+
+    @Test
+    fun continueSaysWhatTheServiceWillResume() {
+        assertEquals("Resume Episode 8", prime.playLabel!!(dump("prime-series-page.xml")))
+        assertEquals("Continue S1:E1 Chapter 1: The Mandalorian", disney.playLabel!!(dump("disney-series-page.xml")))
+        // A film's page has no episode line (Disney+: just its button).
+        assertEquals(null, disney.playLabel!!(dump("disney-picker.xml")))
+    }
+
+    @Test
+    fun aPageThatOffersOnlyToStartOverIsNotTakenForContinue() {
+        // Seen on the TV (The Boys, after an episode was played to its end):
+        // no Resume / Watch button, only "Watch from beginning". Continue
+        // must not press that; picking an episode must still find the page.
+        val restart = dump("prime-series-no-resume.xml")
+        assertEquals(null, prime.playButton!!(restart))
+        assertTrue(prime.noResume!!(restart))
+        assertTrue(prime.onTitlePage!!(restart))
+        assertEquals("The Boys", prime.pageTitle!!(restart)!!.name)
+
+        val normal = dump("prime-series-page.xml")
+        assertTrue(!prime.noResume!!(normal))
+        assertTrue(prime.onTitlePage!!(normal))
+        // Search results show a preview header with the name, but aren't the page.
+        assertTrue(!prime.onTitlePage!!(dump("prime-results.xml")))
+    }
+
+    @Test
+    fun primeSeriesPageIsReadBeforeItsSeasonListIsInView() {
+        val page = dump("prime-series-page.xml")
+        assertEquals("The Boys", prime.pageTitle!!(page)!!.name)
+        // Only a couple of the current season's tiles peek in at the bottom.
+        assertEquals(5, prime.list().seasonShown(page))
+        val cards = prime.list().cards(page)
+        assertEquals(listOf("5x7", "5x8"), cards.eps())
+        assertEquals("Blood and Bone", cards.last().name)
+        assertTrue(cards.none { it.highlighted }) // the highlight is on Resume
+    }
+
+    @Test
+    fun primeSeasonsAreADropDownThatHasToBeOpened() {
+        val closed = dump("prime-series-seasons-closed.xml")
+        // Its Episodes tab is the one showing (Prime also has Explore, Related, Extras).
+        assertEquals(true, prime.list().episodesTab!!(closed)?.second)
+        assertEquals(5, prime.list().seasonShown(closed))
+        assertTrue(prime.list().seasonOpener!!(closed) != null)
+        assertEquals(emptyList<ProfilePickers.Listed>(), prime.list().seasons(closed))
+
+        // Open, it is a window of its own. Its highlight shows as `selected`:
+        // here one Up from Season 5.
+        val open = dump("prime-series-seasons-open.xml")
+        val seasons = prime.list().seasons(open)
+        assertEquals(listOf(1, 2, 3, 4, 5), seasons.map { it.season })
+        assertEquals(listOf(4), seasons.filter { it.highlighted }.map { it.season })
+        // Nothing here says which season is listed: that's read once it closes.
+        assertEquals(null, prime.list().seasonShown(open))
+    }
+
+    @Test
+    fun primeEpisodeRowNamesEachEpisodeAndWhereTheHighlightIs() {
+        val row = dump("prime-series-row.xml")
+        assertEquals(4, prime.list().seasonShown(row))
+        val cards = prime.list().cards(row)
+        assertEquals(listOf("4x4", "4x5", "4x6", "4x7", "4x8"), cards.eps())
+        val at = cards.single { it.highlighted }
+        assertEquals(5, at.episode)
+        // The name the media session gave when this one played on the TV.
+        assertEquals("BEWARE THE JABBERWOCK, MY SON", at.name)
+        assertTrue(prime.list().horizontal)
+        assertTrue(prime.list().sessionNamesEpisode)
+    }
+
+    @Test
+    fun primeEpisodeTilesAreNotMistakenForOtherTitles() {
+        // Search results are tiles too, named without "Season N, Episode N".
+        assertEquals(emptyList<String>(), prime.list().cards(dump("prime-results.xml")).eps())
+    }
+
+    @Test
+    fun disneyListsSeasonsAndEpisodesOnThePage() {
+        val page = dump("disney-series-page.xml")
+        assertEquals(1, disney.list().seasonShown(page))
+
+        val list = dump("disney-series-episodes.xml")
+        val seasons = disney.list().seasons(list)
+        assertEquals(listOf(1, 2, 3), seasons.map { it.season })
+        assertEquals(1, disney.list().seasonShown(list))
+        // The season shown is read from the episodes listed, not only from
+        // `selected`: seen on the TV, with the highlight on a season, none was
+        // marked selected. Here that mark is taken away, and the answer holds.
+        val unmarked = dump("disney-series-episodes.xml", dropSelected = true)
+        assertTrue(disney.list().seasons(unmarked).none { it.node.selected })
+        assertEquals(1, disney.list().seasonShown(unmarked))
+        val cards = disney.list().cards(list)
+        assertEquals(listOf("1x1", "1x2", "1x3", "1x4"), cards.eps())
+        assertEquals(listOf(2), cards.filter { it.highlighted }.map { it.episode })
+        assertTrue(disney.list().seasonOpener == null) // highlighting a season lists it
+        assertTrue(!disney.list().horizontal)
+        // Seasons are a column left of the episodes: Down there is another season.
+        assertEquals(ProfilePickers.Arrow.RIGHT, disney.list().intoEpisodesFromSeasons)
+        assertEquals(null, prime.list().intoEpisodesFromSeasons)
+        // Disney+'s media session names only the show, so the card is the check.
+        assertTrue(!disney.list().sessionNamesEpisode)
+    }
+
+    @Test
+    fun theHighlightIsMovedByPlaceInTheList() {
+        assertEquals(ProfilePickers.Arrow.RIGHT, ProfilePickers.arrowToward(1, 3, horizontal = true))
+        assertEquals(ProfilePickers.Arrow.LEFT, ProfilePickers.arrowToward(5, 3, horizontal = true))
+        assertEquals(ProfilePickers.Arrow.DOWN, ProfilePickers.arrowToward(0, 2, horizontal = false))
+        assertEquals(ProfilePickers.Arrow.UP, ProfilePickers.arrowToward(4, 3, horizontal = false))
+        assertEquals(null, ProfilePickers.arrowToward(3, 3, horizontal = true))
+    }
+
+    @Test
+    fun hboEpisodesAreReachedByRunningLeftToTheStartBeforeCounting() {
+        val route = ProfilePickers.Hbo::episodeRoute
+        fun keys(r: List<ProfilePickers.Arrow>?) = r?.joinToString(" ") { it.name.take(1) }
+        // The Last of Us, S2 E3 ("The Path"), as pressed on the TV: tab,
+        // seasons, back to Season 1, one Right, episodes, back to E1, two Rights.
+        assertEquals("D D L L R D L L L L L L L R R", keys(route(ProfilePickers.Episode(2, 3, "The Path"), 2, 7)))
+        // One season (Chernobyl): HBO Max shows no season row at all.
+        assertEquals("D D L L L L L R R R", keys(route(ProfilePickers.Episode(1, 4, null), 1, 5)))
+        // True Detective opens on its last-watched season; the Lefts undo that.
+        assertTrue(keys(route(ProfilePickers.Episode(1, 1, null), 4, 8))!!.startsWith("D D L L L L D"))
+        // Bounded, however long a season TMDB claims.
+        assertEquals(ProfilePickers.Hbo.MAX_LEFTS, route(ProfilePickers.Episode(1, 1, null), 1, 500)!!.count { it == ProfilePickers.Arrow.LEFT })
+        assertEquals(null, route(ProfilePickers.Episode(3, 1, null), 2, 7))
+        assertEquals(null, route(ProfilePickers.Episode(1, 0, null), 2, 7))
+    }
+
+    @Test
+    fun hboMustNameTheVeryEpisodeAsked() {
+        // What HBO Max's media session said while S2 E3 played on the TV.
+        assertTrue(ProfilePickers.namesEpisode("The Path, The Last of Us", "The Last of Us", "The Path"))
+        assertTrue(ProfilePickers.namesEpisode("When You're Lost in the Darkness, The Last of Us", "The Last of Us", "When You’re Lost in the Darkness"))
+        assertTrue(!ProfilePickers.namesEpisode("Night Country: Part 1, True Detective", "True Detective", "Night Country: Part 10"))
+        assertTrue(!ProfilePickers.namesEpisode("The Path, The Last of Us", "The Last of Us", "Future Days"))
+        assertTrue(!ProfilePickers.namesEpisode("The Path, The Last of Us Podcast", "The Last of Us", "The Path"))
+        assertTrue(!ProfilePickers.namesEpisode("The Path, The Last of Us", "The Last of Us", null))
+    }
+
     // ---- scope -----------------------------------------------------------
 
     @Test
@@ -353,16 +502,18 @@ class ProfilePickersTest {
 
     // ---- a uiautomator dump as ProfilePickers.Node -------------------------
 
-    private class DumpNode(attrs: Map<String, String>, override val parent: DumpNode?) : ProfilePickers.Node {
+    private class DumpNode(attrs: Map<String, String>, override val parent: DumpNode?, dropSelected: Boolean = false) : ProfilePickers.Node {
         override val text = attrs["text"] ?: ""
         override val desc = attrs["content-desc"] ?: ""
         override val viewId = attrs["resource-id"] ?: ""
         override val clickable = attrs["clickable"] == "true"
+        override val focused = attrs["focused"] == "true"
+        override val selected = !dropSelected && attrs["selected"] == "true"
         override val bounds = Regex("-?\\d+").findAll(attrs["bounds"] ?: "").map { it.value.toInt() }.toList()
         override val children = mutableListOf<ProfilePickers.Node>()
     }
 
-    private fun dump(name: String): ProfilePickers.Node {
+    private fun dump(name: String, dropSelected: Boolean = false): ProfilePickers.Node {
         val xml = javaClass.classLoader!!.getResource("pickers/$name")!!.readText()
         val root = DumpNode(emptyMap(), null)
         var current = root
@@ -373,7 +524,7 @@ class ProfilePickersTest {
             }
             val attrs = Regex("([\\w-]+)=\"([^\"]*)\"").findAll(m.groupValues[1])
                 .associate { it.groupValues[1] to unescape(it.groupValues[2]) }
-            val node = DumpNode(attrs, current)
+            val node = DumpNode(attrs, current, dropSelected)
             current.children += node
             if (m.groupValues[2] != "/") current = node
         }

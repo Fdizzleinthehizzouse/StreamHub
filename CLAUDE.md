@@ -59,7 +59,15 @@ Do not "fix" these — they were investigated, most of them on the real TV.
    the title highlighted; Félix presses OK (chosen by him, 2026-09-20).
 6. **Accessibility clicks are not remote presses.** Prime Video ignored
    `ACTION_CLICK` on its highlighted tile (reported as delivered). Real key
-   events work — see "Key presses" in HANDOVER.md.
+   events work — see "Key presses" in HANDOVER.md. Inside episode lists the
+   highlight is moved by keys only: Disney+ accepted `ACTION_FOCUS` there and
+   then ignored Down.
+8. **Continue is the service's own button; one episode is walked to.**
+   Continue presses the page's Resume / Continue (never "Watch from
+   beginning"). One chosen episode is reached through the page's season and
+   episode lists — read and checked on Prime Video and Disney+, blind but
+   named afterwards on HBO Max — and is **never offered on Netflix**
+   (Félix's call, 2026-09-27). See the table in HANDOVER.md.
 
 ## Layout
 
@@ -76,7 +84,8 @@ firetv/                  THE PRODUCT — Android app, Kotlin
         ProfilePickerService.kt  accessibility service: profile pick, Disney+ typing, Back/Home
         BlindPlay.kt       HBO Max autoplay: type, step, OK, verify via media session
       data/                Tmdb, Omdb, Store, Recommender, Models, Services, Genres, Http
-                           (browsing is /api/browse: paged, sortable, filterable)
+                           (browsing is /api/browse: paged, sortable, filterable;
+                           a season's episodes are /api/episodes)
     assets/remote/         THE PHONE UI (html/css/js)
     res/xml/profile_picker_service.xml   accessibility config (package-limited)
   app/src/test/            JVM tests: real ControlServer over HTTP, real screen dumps

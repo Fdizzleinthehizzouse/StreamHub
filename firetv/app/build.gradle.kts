@@ -51,8 +51,8 @@ android {
         targetSdk = 28
         // Bump versionCode for every release, or the TV refuses the update as
         // "already installed" - it compares this number, not versionName.
-        versionCode = 2
-        versionName = "1.1"
+        versionCode = 3
+        versionName = "1.2"
     }
 
     signingConfigs {

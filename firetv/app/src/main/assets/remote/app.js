@@ -872,7 +872,12 @@ async function openSheet(mediaType, id) {
           )
         : null,
 
-      el('div', { class: 'label', text: 'Play on the TV' }),
+      el('div', { class: 'label', text: d.mediaType === 'tv' ? 'Continue on the TV' : 'Play on the TV' }),
+      // Each service's own Resume / Continue is what gets pressed, so it
+      // picks up where you left off (or starts at the beginning).
+      d.mediaType === 'tv' && d.availableOn && d.availableOn.length
+        ? el('p', { class: 'hint', text: 'Picks up where you left off. To start a particular episode, choose it under Episodes.' })
+        : null,
       d.availableOn && d.availableOn.length
         ? el(
             'div',
@@ -901,6 +906,10 @@ async function openSheet(mediaType, id) {
             // opened by an app, and trying it landed in the web browser.
             'Not on your four services right now.'
           ),
+
+      d.mediaType === 'tv' && d.seasonList && d.seasonList.length && d.availableOn && d.availableOn.length
+        ? episodesSection(d, slim)
+        : null,
 
       el(
         'div',
@@ -981,12 +990,94 @@ function closeSheet() {
   $('#sheet').replaceChildren();
 }
 
+/**
+ * A series' seasons and episodes, to start one on the TV. Offered only on the
+ * services the TV says it can do that on right now (`episodeServices`):
+ * Netflix never (nothing on its screen can be checked), the others only
+ * while the TV's helpers are running.
+ */
+function episodesSection(d, slim) {
+  const services = d.episodeServices || [];
+  const list = el('div', { class: 'ep-list' });
+  const today = new Date().toISOString().slice(0, 10);
+
+  const note =
+    services.length === 0
+      ? d.availableOn.every((a) => a.serviceId === 'netflix')
+        ? 'Netflix can’t be sent to one episode. Use Continue, then pick the episode on the TV.'
+        : 'The TV can’t pick an episode right now: its helpers aren’t running. Continue still works.'
+      : null;
+
+  async function showSeason(n, chip) {
+    for (const c of chips.children) c.classList.toggle('on', c === chip);
+    list.replaceChildren(el('div', { class: 'spinner' }));
+    let res;
+    try {
+      res = await api(`/api/episodes?id=${d.id}&season=${n}`);
+    } catch (err) {
+      list.replaceChildren(el('div', { class: 'empty', text: err.message }));
+      return;
+    }
+    list.replaceChildren(...res.episodes.map((e) => episodeRow(n, e)));
+  }
+
+  function episodeRow(season, e) {
+    const out = !e.airDate || e.airDate > today;
+    const episode = { season, number: e.number, name: e.name };
+    const row = el(
+      'button',
+      { class: 'ep-row', disabled: out || services.length === 0, 'data-episode': `${season}x${e.number}` },
+      el('span', { class: 'n', text: String(e.number) }),
+      el('span', { class: 't', text: e.name }),
+      el('span', { class: 'm', text: out ? 'not out yet' : e.runtime ? `${e.runtime} min` : '' })
+    );
+    const wrap = el('div', { class: 'ep' }, row);
+    row.addEventListener('click', () => {
+      if (services.length === 1) return playOnTv(services[0], slim, episode);
+      // More than one service has it: say which.
+      const open = wrap.querySelector('.ep-pick');
+      if (open) return open.remove();
+      wrap.append(
+        el(
+          'div',
+          { class: 'ep-pick' },
+          services.map((id) =>
+            el('button', { class: 'play-btn', style: { background: S.svcById[id].color }, onClick: () => playOnTv(id, slim, episode) }, el('span', { text: `Play on ${S.svcById[id].name}` }), el('span', { class: 'arrow', text: '›' }))
+          )
+        )
+      );
+    });
+    return wrap;
+  }
+
+  const chips = el(
+    'div',
+    { class: 'chips seasons' },
+    d.seasonList.map((s) => {
+      const chip = el('button', { class: 'chip season', text: d.seasonList.length > 1 ? `Season ${s.number}` : s.name, 'data-season': String(s.number) });
+      chip.addEventListener('click', () => showSeason(s.number, chip));
+      return chip;
+    })
+  );
+  // Season 1 to start with; the rest are one tap away.
+  queueMicrotask(() => showSeason(d.seasonList[0].number, chips.firstChild));
+
+  return el('div', { class: 'episodes' }, el('div', { class: 'label', text: 'Episodes' }), note ? el('p', { class: 'hint', text: note }) : null, chips, list);
+}
+
 /* ---------------------------------------------------------------- play */
 
-async function playOnTv(serviceId, item) {
+/** "S2 E3", for the phone's messages. */
+function episodeTag(ep) {
+  return ep ? `S${ep.season} E${ep.number}` : '';
+}
+
+async function playOnTv(serviceId, item, episode = null) {
   const svc = S.svcById[serviceId];
   try {
-    const res = await api('/api/play', { method: 'POST', body: { serviceId, item } });
+    const body = { serviceId, item };
+    if (episode) body.episode = episode;
+    const res = await api('/api/play', { method: 'POST', body });
     // The TV answers 200 even when it could not start anything, so the flag has
     // to be checked - otherwise a missing app looked like a success.
     if (res.ok === false) {
@@ -998,7 +1089,7 @@ async function playOnTv(serviceId, item) {
     // The TV wakes itself when a title arrives while it sleeps. Say so, so a
     // dark room and a few seconds of nothing don't read as a failure.
     const woke = res.woke ? 'Woke the TV. ' : '';
-    if (res.autoplay && item) followAutoplay(svc.name, item.title, woke);
+    if (res.autoplay && item) followAutoplay(svc.name, episode ? `“${item.title}” ${episodeTag(episode)}` : `“${item.title}”`, woke);
     else toast(woke + playMessage(res.kind, svc.name, item && item.title));
     closeSheet();
     updateBadge();
@@ -1012,11 +1103,12 @@ async function playOnTv(serviceId, item) {
  * when the TV has confirmed it (from Android's media session), never on hope.
  */
 let autoplayRun = 0;
-async function followAutoplay(service, title, prefix = '') {
+async function followAutoplay(service, what, prefix = '') {
   const run = ++autoplayRun; // a newer title supersedes this one
-  toast(`${prefix}${service}: finding “${title}”…`);
+  toast(`${prefix}${service}: finding ${what}…`);
   let last = '';
-  const deadline = Date.now() + 110000;
+  // Walking to one episode can take the TV up to a minute more.
+  const deadline = Date.now() + 170000;
   while (run === autoplayRun && Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, 1500));
     let s;
@@ -1027,7 +1119,7 @@ async function followAutoplay(service, title, prefix = '') {
     }
     // HBO Max sometimes can't say what it's playing; the TV then says so.
     if (s.state === 'playing') {
-      return toast(s.message && s.message !== 'Playing' ? `▶ ${service}: ${s.message}` : `▶ Playing “${title}” on ${service}`);
+      return toast(s.message && s.message !== 'Playing' ? `▶ ${service}: ${s.message}` : `▶ Playing ${what} on ${service}`);
     }
     if (s.state === 'stopped') return toast(`${service}: ${s.message}`, true);
     // "done" is as far as the TV goes on its own (Netflix: the results, with

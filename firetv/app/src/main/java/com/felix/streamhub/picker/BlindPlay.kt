@@ -43,6 +43,15 @@ object BlindPlay {
     private const val NETFLIX_SEARCH_MS = 4_000L
     private const val RESULTS_MS = 3_500L
     private const val KEY_GAP_MS = 400L
+    /**
+     * A series' page, key by key. Seen on the TV: at 0.4 s a key HBO Max lost
+     * presses on this page and ended up leaving it; at human speed (~1 s a
+     * key, 2 s after each Down onto a new row) the same route landed.
+     */
+    private const val ROUTE_KEY_MS = 1_000L
+    private const val ROW_MS = 2_000L
+    /** Before the first press: the page's rows draw after its title and button. */
+    private const val ROUTE_START_MS = 2_000L
     private const val PAGE_MS = 5_000L
     private const val PLAY_CONFIRM_MS = 25_000L
     private const val POLL_MS = 1_000L
@@ -57,7 +66,9 @@ object BlindPlay {
         /** What this service's media session said before we started, if anything. */
         val before: Pair<String, String>?,
         /** Netflix only: which place in its profile list is this phone's. */
-        val place: Int?
+        val place: Int?,
+        /** HBO Max, a chosen episode: the presses from the series' page to it. */
+        val route: List<ProfilePickers.Arrow>?
     ) {
         fun report(state: State, message: String) =
             ProfilePickerService.publish(Status(deviceId, serviceId, wanted.title, state, message))
@@ -83,8 +94,18 @@ object BlindPlay {
      * running decides how long its page gets to load, and Netflix is closed
      * here so that the launch starts from its profile screen.
      */
-    fun start(deviceId: String, serviceId: String, wanted: ProfilePickers.Wanted, netflixPlace: Int?): Boolean {
+    fun start(
+        deviceId: String,
+        serviceId: String,
+        wanted: ProfilePickers.Wanted,
+        netflixPlace: Int?,
+        /** HBO Max, a chosen episode: see [ProfilePickers.Hbo.episodeRoute]. */
+        episodeRoute: List<ProfilePickers.Arrow>? = null
+    ): Boolean {
         if (!canAutoplay(serviceId, netflixPlace)) return false
+        // Netflix is never sent to an episode (Félix's call, 2026-09-27: it
+        // can't be checked), and HBO Max needs its route worked out first.
+        if (wanted.episode != null && (serviceId != ProfilePickers.Hbo.SERVICE_ID || episodeRoute == null)) return false
         val text = ProfilePickers.SearchKeyboard.searchText(wanted.title)
         if (text.isEmpty() || ProfilePickers.SearchKeyboard.rightsToFirstResult(text) == null) return false
         val packages = packagesOf(serviceId)
@@ -96,7 +117,7 @@ object BlindPlay {
         // screen, and its screen can't be read to find out.
         if (netflix) NETFLIX.forEach { TvKeys.stopApp(it) }
         val wasRunning = !netflix && packages.any { TvKeys.isRunning(it) == true }
-        val job = Job(deviceId, serviceId, packages, wanted, text, wasRunning, playingNow(packages), netflixPlace)
+        val job = Job(deviceId, serviceId, packages, wanted, text, wasRunning, playingNow(packages), netflixPlace, episodeRoute)
         current = job
         job.report(State.WORKING, "Looking for “${wanted.title}”")
         Thread({
@@ -128,7 +149,25 @@ object BlindPlay {
         if (!live(job)) return
         if (!inFront(job)) return stop(job, "HBO Max was left before Play")
 
-        job.report(State.WORKING, "Starting “${job.wanted.title}”")
+        val ep = job.wanted.episode
+        if (ep != null) {
+            // Blind: the route runs Left to the start of each row before it
+            // counts (see Hbo.episodeRoute), and what plays is checked by name.
+            job.report(State.WORKING, "Finding ${ep.label}")
+            Thread.sleep(ROUTE_START_MS)
+            for (arrow in job.route.orEmpty()) {
+                if (!live(job)) return
+                if (!inFront(job)) return stop(job, "HBO Max was left while finding ${ep.label}")
+                TvKeys.press(keyOf(arrow))
+                // A new row (the tab, the seasons, a season's episodes) takes a moment to draw.
+                Thread.sleep(if (arrow == ProfilePickers.Arrow.DOWN) ROW_MS else ROUTE_KEY_MS)
+            }
+            if (!live(job)) return
+            if (!inFront(job)) return stop(job, "HBO Max was left before ${ep.label} could be started")
+            job.report(State.WORKING, "Starting ${ep.label}")
+        } else {
+            job.report(State.WORKING, "Starting “${job.wanted.title}”")
+        }
         press(TvKeys.Key.OK)
         val confirmBy = System.currentTimeMillis() + PLAY_CONFIRM_MS
         while (System.currentTimeMillis() < confirmBy) {
@@ -137,9 +176,21 @@ object BlindPlay {
             val now = playingNow(job.packages) ?: continue
             val title = now.second
             when {
-                ProfilePickers.namesTitle(title, job.wanted.title, job.wanted.isMovie) -> {
+                // A chosen episode must be that very episode, by name.
+                ep != null && title.isNotBlank() && now != job.before -> {
+                    if (ProfilePickers.namesEpisode(title, job.wanted.title, ep.name)) {
+                        Log.i(TAG, "hbomax: playing “$title”")
+                        job.report(State.PLAYING, "Playing ${ep.label}: “$title”")
+                        current = null
+                        return
+                    }
+                    press(TvKeys.Key.BACK)
+                    return stop(job, "HBO Max started “$title”, not ${ep.label} (“${ep.name}”), so it was stopped")
+                }
+                ep == null && ProfilePickers.namesTitle(title, job.wanted.title, job.wanted.isMovie) -> {
                     Log.i(TAG, "hbomax: playing “$title”")
-                    job.report(State.PLAYING, "Playing")
+                    // For a series this is what Continue picked: "The Path, The Last of Us".
+                    job.report(State.PLAYING, "Playing “$title”")
                     current = null
                     return
                 }
@@ -273,6 +324,13 @@ object BlindPlay {
     }
 
     private fun pressTimes(key: TvKeys.Key, times: Int) = repeat(times) { press(key) }
+
+    private fun keyOf(a: ProfilePickers.Arrow) = when (a) {
+        ProfilePickers.Arrow.UP -> TvKeys.Key.UP
+        ProfilePickers.Arrow.DOWN -> TvKeys.Key.DOWN
+        ProfilePickers.Arrow.LEFT -> TvKeys.Key.LEFT
+        ProfilePickers.Arrow.RIGHT -> TvKeys.Key.RIGHT
+    }
 
     private fun playingNow(packages: List<String>): Pair<String, String>? =
         TvKeys.nowPlaying()?.firstOrNull { it.first in packages }

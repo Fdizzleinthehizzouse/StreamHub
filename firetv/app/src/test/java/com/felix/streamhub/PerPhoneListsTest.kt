@@ -136,6 +136,48 @@ class PerPhoneListsTest {
         assertEquals(401, call("GET", "/api/browse", null).first)
     }
 
+    /**
+     * One chosen episode is refused, with a reason, before anything opens on
+     * the TV. (Nothing can open here: the test's TV has no Android behind it,
+     * so reaching the launch would fail the request.)
+     */
+    @Test
+    fun anEpisodeTheTvCantPickIsRefusedBeforeAnythingOpens() {
+        val token = pair(DEVICE_A)
+        val show = """"item":{"id":100088,"mediaType":"tv","title":"The Last of Us"}"""
+
+        // Netflix: Félix's call - nothing on its screen can be checked.
+        val (s1, b1) = call("POST", "/api/play", token, """{"serviceId":"netflix",$show,"episode":{"season":2,"number":3,"name":"The Path"}}""")
+        assertEquals(b1, 200, s1)
+        assertFalse(b1, JSONObject(b1).getBoolean("ok"))
+        assertTrue(b1, JSONObject(b1).getString("error").contains("Netflix can’t be sent to one episode"))
+
+        // Not known to be in the subscription (TMDB is out of reach here).
+        val (_, b2) = call("POST", "/api/play", token, """{"serviceId":"primevideo",$show,"episode":{"season":1,"number":1}}""")
+        assertFalse(b2, JSONObject(b2).getBoolean("ok"))
+        assertTrue(b2, JSONObject(b2).getString("error").contains("isn’t included"))
+    }
+
+    @Test
+    fun onlyARealEpisodeOfASeriesIsAccepted() {
+        val token = pair(DEVICE_A)
+        val show = """"item":{"id":100088,"mediaType":"tv","title":"The Last of Us"}"""
+        val film = """"item":{"id":438631,"mediaType":"movie","title":"Dune"}"""
+        for (bad in listOf(
+            """{"serviceId":"hbomax",$show,"episode":{"season":0,"number":1}}""",
+            """{"serviceId":"hbomax",$show,"episode":{"season":1,"number":0}}""",
+            """{"serviceId":"hbomax",$show,"episode":{"season":100,"number":1}}""",
+            """{"serviceId":"hbomax",$show,"episode":"S1E1"}""",
+            """{"serviceId":"hbomax",$film,"episode":{"season":1,"number":1}}"""
+        )) {
+            assertEquals(bad, 400, call("POST", "/api/play", token, bad).first)
+        }
+        assertEquals(400, call("GET", "/api/episodes?id=100088&season=0", token).first)
+        assertEquals(400, call("GET", "/api/episodes?id=abc&season=1", token).first)
+        assertEquals(400, call("GET", "/api/episodes?id=100088", token).first)
+        assertEquals(401, call("GET", "/api/episodes?id=100088&season=1", null).first)
+    }
+
     @Test
     fun pairingWithoutADeviceIdIsRefused() {
         val code = store.ensureControlToken()

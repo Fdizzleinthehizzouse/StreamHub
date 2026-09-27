@@ -61,6 +61,48 @@ Gotchas that cost time:
 - Git Bash mangles `/sdcard/...` in `adb pull`: use `//sdcard/...`.
 - `dumps/tree.js file.xml` prints a uiautomator dump as an indented tree.
 
+## Update — 2026-09-27: Continue, and one chosen episode
+
+A series' sheet on the phone now says **Continue on the TV** (the services'
+own Resume / Continue, which is what autoplay always pressed) and lists
+**Episodes** by season (TMDB, `/api/episodes`). Tapping an episode starts
+that one. Verified live on the TV, each from the phone's API:
+
+| | Continue | One episode |
+|---|---|---|
+| Prime Video | "Resume Episode 4" read off `watch_now_button`, ~15 s | S4 E3, S2 E4, S3 E1 (season changed via its drop-down), ~22 s; confirmed by the media session naming the episode |
+| Disney+ | "Continue S2:E5 Chapter 13: The Jedi", ~15–28 s | S2 E5, S1 E6 (season changed), 22–35 s; confirmed on screen before OK (its media session names only the show) |
+| HBO Max | the media session's "The Path, The Last of Us", ~44 s | S1 E2, S2 E4, ~54–64 s, blind key route, confirmed afterwards by name, Back if wrong |
+| Netflix | unchanged (stops at the results) | **not offered** — Félix's call: nothing can be checked |
+
+The phone is only offered episodes on services the TV can do it on right now
+(`episodeServices` in `/api/details`); the TV refuses anything else before
+opening anything.
+
+Learned on the TV, all in `ProfilePickers.kt` comments and tests:
+- **Prime**: a 4th tab ("Explore") appeared this week; the page draws its
+  lower half seconds after its name and Play button (Down pressed too early
+  ran past the episodes); labels use no-break spaces (`Episodes, Tab,
+  Selected` did not match until normalised). When Prime counts the current
+  episode as watched, its page has **no Resume button, only "Watch from
+  beginning"** — Continue then stops and says so instead of restarting.
+- **Disney+**: moving the highlight onto a season lists it, but no season is
+  marked `selected` while it has the highlight (read the season off the
+  episodes instead). ACTION_FOCUS put the highlight on an episode from which
+  Down did nothing — in episode lists the highlight moves by keys only. The
+  seasons are a column left of the episodes: Right to cross, not Down.
+- **HBO Max**: the season row opens on the last-watched season and exists
+  only for series with more than one; Left stops at the first season and
+  first episode. At 0.4 s a key it lost presses and left the page; at ~1 s a
+  key (2 s after each Down) the route lands.
+- Once seen, not reproduced: Disney+ sat on "Looking for" until the time
+  limit. The phone is now told "never showed its profiles, its search or the
+  title" instead of "nothing to do".
+
+`dumps/` has the screens (git-ignored). A PC-side stand-in for the phone that
+runs every case is easy to rebuild: POST `/api/play` with `episode:
+{season, number, name}` and follow `/api/autoplay`.
+
 ## Update — 2026-09-20: Netflix, as far as it can honestly go
 
 Netflix now opens its **search results with the title highlighted**, and Félix

@@ -9,6 +9,37 @@ import org.junit.Test
 
 class TmdbTest {
 
+    @Test
+    fun specialsAreNotCountedAsASeason() {
+        // TMDB lists "Specials" as season 0. HBO Max is driven by counting
+        // seasons, so counting it would put every season one place off.
+        val details = JSONObject("""{"seasons": [
+            {"season_number": 0, "name": "Specials", "episode_count": 3, "air_date": "2023-01-01"},
+            {"season_number": 2, "name": "Season 2", "episode_count": 7, "air_date": "2025-04-13"},
+            {"season_number": 1, "name": "Season 1", "episode_count": 9, "air_date": null}
+        ]}""")
+        val seasons = Tmdb.seasonsFrom(details)
+        assertEquals(listOf(1, 2), seasons.map { it.number })
+        assertEquals(9, seasons[0].episodeCount)
+        assertEquals(null, seasons[0].airDate)
+        assertEquals(emptyList<Any>(), Tmdb.seasonsFrom(JSONObject("{}")))
+    }
+
+    @Test
+    fun aSeasonsEpisodesKeepTheirNumbersAndNames() {
+        val season = JSONObject("""{"episodes": [
+            {"episode_number": 3, "name": "The Path", "runtime": 57, "air_date": "2025-04-27"},
+            {"episode_number": 1, "name": "Future Days", "runtime": null, "air_date": "2025-04-13"},
+            {"episode_number": 2, "air_date": null}
+        ]}""")
+        val eps = Tmdb.episodesFrom(season)
+        assertEquals(listOf(1, 2, 3), eps.map { it.number })
+        assertEquals("The Path", eps[2].name)
+        assertEquals(57, eps[2].runtime)
+        assertEquals(null, eps[0].runtime)
+        assertEquals("Episode 2", eps[1].name) // unnamed yet: not "null"
+    }
+
     /** The desktop app's "genres are OR-joined" fix, which the TV app never had. */
     @Test
     fun genresAreOrJoinedSoPicksForYouIsNotAnEmptyIntersection() {

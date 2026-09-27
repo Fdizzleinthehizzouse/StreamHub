@@ -100,6 +100,7 @@ class ControlServer(
             uri == "/api/search" -> doSearch(q("q"))
             uri == "/api/browse" -> doBrowse(mapOf("service" to q("service"), "genre" to q("genre"), "sort" to q("sort"), "kind" to q("kind"), "page" to q("page")))
             uri == "/api/details" -> doDetails(q("mediaType"), q("id"))
+            uri == "/api/episodes" -> doEpisodes(q("id"), q("season"))
             uri == "/api/watchlist" -> doToggle(session, deviceId, pinned = false)
             uri == "/api/pinned" -> doToggle(session, deviceId, pinned = true)
             uri == "/api/play" -> doPlay(session, deviceId)
@@ -360,7 +361,51 @@ class ControlServer(
             .put("recommendations", titlesJson(d.recommendations))
             .put("ratings", ratings)
 
+        if (mediaType == "tv") {
+            val seasons = JSONArray()
+            for (s in d.seasonList) {
+                seasons.put(
+                    JSONObject().put("number", s.number).put("name", s.name)
+                        .put("episodes", s.episodeCount).put("airDate", s.airDate ?: JSONObject.NULL)
+                )
+            }
+            out.put("seasonList", seasons)
+            // Only what this TV can do right now, so the phone never offers
+            // an episode that would end in "couldn't".
+            out.put("episodeServices", JSONArray(d.availableOn.filter { it.included && canPickEpisode(it.serviceId) }.map { it.serviceId }))
+        }
+
         return json(Response.Status.OK, out)
+    }
+
+    /**
+     * Whether this TV can start one chosen episode on [serviceId]. Prime
+     * Video and Disney+ by reading their screens, HBO Max by counting key
+     * presses and checking the name afterwards. Never Netflix: nothing there
+     * can be checked (Félix's call, 2026-09-27).
+     */
+    private fun canPickEpisode(serviceId: String): Boolean = when (serviceId) {
+        ProfilePickers.Hbo.SERVICE_ID -> BlindPlay.canAutoplay(serviceId, null)
+        ProfilePickers.Netflix.SERVICE_ID -> false
+        else -> ProfilePickers.forService(serviceId)?.episodes != null &&
+            ProfilePickerService.canAutoplay(serviceId) && TvKeys.helperRunning()
+    }
+
+    private fun doEpisodes(id: String?, season: String?): Response {
+        val numeric = id?.toIntOrNull()?.takeIf { it > 0 }
+            ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Invalid id."))
+        val n = season?.toIntOrNull()?.takeIf { it in 1..MAX_SEASON }
+            ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Invalid season."))
+        val eps = runCatching { runBlocking { tmdb.season(numeric, n) } }
+            .getOrElse { return json(Response.Status.INTERNAL_ERROR, JSONObject().put("error", it.message ?: "Could not load that season.")) }
+        val arr = JSONArray()
+        for (e in eps) {
+            arr.put(
+                JSONObject().put("number", e.number).put("name", e.name)
+                    .put("runtime", e.runtime ?: JSONObject.NULL).put("airDate", e.airDate ?: JSONObject.NULL)
+            )
+        }
+        return json(Response.Status.OK, JSONObject().put("season", n).put("episodes", arr))
     }
 
     private fun doToggle(session: IHTTPSession, deviceId: String, pinned: Boolean): Response {
@@ -390,6 +435,36 @@ class ControlServer(
         val svc = Services.byId(serviceId)
             ?: return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Pick one of the services."))
 
+        // One chosen episode, instead of the service's own Continue.
+        val episode = if (!body.has("episode")) null else {
+            val e = body.optJSONObject("episode")
+            val s = e?.optInt("season") ?: 0
+            val n = e?.optInt("number") ?: 0
+            if (s !in 1..MAX_SEASON || n !in 1..MAX_EPISODE || item?.optString("mediaType") != "tv" || titleText == null) {
+                return json(Response.Status.BAD_REQUEST, JSONObject().put("error", "Bad episode."))
+            }
+            ProfilePickers.Episode(s, n, e?.optString("name")?.take(200)?.ifBlank { null })
+        }
+        // Refused before anything opens: an episode half-reached is worse
+        // than a clear "can't" (the phone offers Continue instead).
+        if (episode != null) {
+            val why = when {
+                serviceId == ProfilePickers.Netflix.SERVICE_ID ->
+                    "Netflix can’t be sent to one episode: nothing on its screen can be checked. Use Continue, then pick the episode on the TV."
+                !includedOn(serviceId, Title.fromJson(item!!)) -> "“${titleText}” isn’t included in your ${svc.name} subscription here."
+                !canPickEpisode(serviceId) -> "The TV can’t pick an episode on ${svc.name} right now: its helpers aren’t running (see the README)."
+                else -> null
+            }
+            if (why != null) return json(Response.Status.OK, JSONObject().put("ok", false).put("error", why))
+        }
+        // HBO Max is driven by counting, so it needs TMDB's counts to size its runs.
+        val hboRoute = if (episode != null && serviceId == ProfilePickers.Hbo.SERVICE_ID) {
+            val seasons = runCatching { runBlocking { tmdb.details("tv", item!!.optInt("id")) }.seasonList }.getOrNull()
+            val inSeason = seasons?.firstOrNull { it.number == episode.season }?.episodeCount
+            seasons?.let { ProfilePickers.Hbo.episodeRoute(episode, it.size, inSeason ?: 0) }
+                ?: return json(Response.Status.OK, JSONObject().put("ok", false).put("error", "Couldn’t look up ${episode.label} of “${titleText}”."))
+        } else null
+
         // A title sent to a sleeping TV turns it on: it is still on the wifi.
         val woke = AppLauncher.wakeScreen(context)
 
@@ -407,12 +482,18 @@ class ControlServer(
         val blind = BlindPlay.canAutoplay(serviceId, netflixPlace)
         val autoplay = titleText?.takeIf { blind || (ProfilePickerService.canAutoplay(serviceId) && TvKeys.helperRunning()) }
             ?.takeIf { item != null && includedOn(serviceId, Title.fromJson(item)) }
-            ?.let { ProfilePickers.Wanted(it, item?.optIntOrNull("year"), isMovie = item?.optString("mediaType") == "movie") }
+            ?.let { ProfilePickers.Wanted(it, item?.optIntOrNull("year"), isMovie = item?.optString("mediaType") == "movie", episode = episode) }
         val relaunch = { main.post { AppLauncher.launch(context, serviceId, titleText, contentId) }; Unit }
         val armed = if (blind && autoplay != null) {
-            BlindPlay.start(deviceId, serviceId, autoplay, netflixPlace)
+            BlindPlay.start(deviceId, serviceId, autoplay, netflixPlace, hboRoute)
         } else {
             ProfilePickerService.arm(serviceId, deviceId, store.profileNames(deviceId)[serviceId], typed, autoplay, relaunch)
+        }
+        // Checked above, so this is the rare race (a helper stopping in between).
+        if (episode != null && (autoplay == null || !armed)) {
+            ProfilePickerService.disarm()
+            BlindPlay.cancel()
+            return json(Response.Status.OK, JSONObject().put("ok", false).put("error", "The TV couldn’t start looking for ${episode.label}. Try again, or use Continue."))
         }
 
         // Starting another app has to happen on the main thread.
@@ -632,6 +713,10 @@ class ControlServer(
         const val BROWSE_CHECK_LIMIT = 40
 
         val SORTS = setOf("popular", "new", "rated")
+
+        /** Bounds on an episode a phone asks for; far past any real series. */
+        const val MAX_SEASON = 99
+        const val MAX_EPISODE = 999
 
         val ASSETS = mapOf(
             "/index.html" to "text/html; charset=utf-8",

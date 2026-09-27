@@ -39,6 +39,7 @@ let hasKey = false;
 let token = null;
 let profiles = null; // null: this phone has never been asked
 let autoplayPolls = 0;
+let lastEpisode = null;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.webmanifest': 'application/manifest+json' };
 
 const server = http.createServer(async (req, res) => {
@@ -129,6 +130,41 @@ const server = http.createServer(async (req, res) => {
       ],
     });
   }
+  if (p === '/api/details' && url.searchParams.get('id') === '100088') {
+    // A series on three services; the TV can pick episodes on two of them.
+    return send(200, {
+      id: 100088, mediaType: 'tv', title: 'The Last of Us', year: 2023, poster: null, backdrop: null, overview: 'Stub.', score: 85, genreIds: [18],
+      seasons: 2, genres: ['Drama'], directors: [], cast: [], recommendations: [], ratings: null,
+      availableOn: [{ serviceId: 'hbomax', kind: 'included' }, { serviceId: 'primevideo', kind: 'included' }, { serviceId: 'netflix', kind: 'included' }],
+      seasonList: [{ number: 1, name: 'Season 1', episodes: 9 }, { number: 2, name: 'Season 2', episodes: 7 }],
+      episodeServices: ['hbomax', 'primevideo'],
+    });
+  }
+  if (p === '/api/details' && url.searchParams.get('id') === '66732') {
+    return send(200, {
+      id: 66732, mediaType: 'tv', title: 'Stranger Things', year: 2016, poster: null, backdrop: null, overview: 'Stub.', score: 86, genreIds: [18],
+      seasons: 1, genres: [], directors: [], cast: [], recommendations: [], ratings: null,
+      availableOn: [{ serviceId: 'netflix', kind: 'included' }],
+      seasonList: [{ number: 1, name: 'Stranger Things', episodes: 8 }],
+      episodeServices: [],
+    });
+  }
+  if (p === '/api/episodes') {
+    const n = Number(url.searchParams.get('season'));
+    return send(200, {
+      season: n,
+      episodes: n === 2
+        ? [
+            { number: 1, name: 'Future Days', runtime: 59, airDate: '2025-04-13' },
+            { number: 2, name: 'Through the Valley', runtime: 57, airDate: '2025-04-20' },
+            { number: 3, name: 'Not Yet Shown', runtime: null, airDate: '2099-01-01' },
+          ]
+        : [
+            { number: 1, name: 'When You’re Lost in the Darkness', runtime: 81, airDate: '2023-01-15' },
+            { number: 2, name: 'Infected', runtime: 53, airDate: '2023-01-22' },
+          ],
+    });
+  }
   if (p === '/api/details') {
     return send(200, {
       ...TITLES[0], runtime: 49, seasons: 5, genres: ['Drama', 'Crime'],
@@ -146,11 +182,18 @@ const server = http.createServer(async (req, res) => {
   if (p === '/api/autoplay') {
     // Two looks while working, then the TV confirms playback.
     autoplayPolls += 1;
+    if (lastEpisode) {
+      // As the real TV words it once HBO Max's media session names the episode.
+      if (autoplayPolls < 3) return send(200, { state: 'working', message: 'Finding Season 2, Episode 2', service: 'hbomax' });
+      return send(200, { state: 'playing', message: 'Playing Season 2, Episode 2: “Through the Valley, The Last of Us”', service: 'hbomax' });
+    }
     if (autoplayPolls < 3) return send(200, { state: 'working', message: 'Opening “Dune”', service: 'primevideo' });
     return send(200, { state: 'playing', message: 'Playing', service: 'primevideo' });
   }
   if (p === '/api/play') {
     if (!body.serviceId) return send(400, { error: 'Pick one of the services.' });
+    lastEpisode = body.episode || null;
+    if (body.episode) return send(200, { ok: true, kind: 'search', autoplay: true, woke: false, service: 'HBO Max', state: { watchlist: [], pinned: [] } });
     // As when a title arrives while the TV sleeps: it wakes itself first.
     if (body.serviceId === 'primevideo') return send(200, { ok: true, kind: 'search', autoplay: true, woke: true, service: 'Prime Video', state: { watchlist: [], pinned: [] } });
     if (body.serviceId === 'hbomax') return send(200, { ok: false, error: 'HBO Max is not installed on this TV.' });
@@ -381,6 +424,50 @@ const server = http.createServer(async (req, res) => {
   const doneToast = await page.locator('#toast').textContent();
   check('and says playing once the TV confirms it', /▶ Playing “Dune” on Prime Video/.test(doneToast), doneToast);
   check('by asking the TV, not assuming', autoplayPolls >= 3, String(autoplayPolls));
+
+  // --- a series: continue, or one chosen episode ---------------------------
+  calls.length = 0;
+  await page.evaluate(() => openSheet('tv', 100088));
+  await page.waitForTimeout(700);
+  const seriesSheet = await page.locator('#sheet').textContent();
+  check('a series offers to continue where you left off', seriesSheet.includes('Continue on the TV') && seriesSheet.includes('Picks up where you left off'), seriesSheet.slice(0, 200));
+  check('and lists its seasons', (await page.locator('.chip.season').allTextContents()).join('|') === 'Season 1|Season 2');
+  check('starting with the first, loaded from the TV', calls.some((c) => c.path === '/api/episodes' && c.query.season === '1') && (await page.locator('.ep-row').count()) === 2);
+  await page.locator('.chip.season[data-season="2"]').click();
+  await page.waitForTimeout(500);
+  check('another season shows its episodes', calls.some((c) => c.path === '/api/episodes' && c.query.season === '2') && (await page.locator('.ep-row').count()) === 3);
+  check('an episode that hasn’t come out can’t be chosen', await page.locator('.ep-row[data-episode="2x3"]').isDisabled() && (await page.locator('.ep-row[data-episode="2x3"]').textContent()).includes('not out yet'));
+  await page.screenshot({ path: path.join(__dirname, 'shots', '28-tv-episodes.png') });
+
+  await page.locator('.ep-row[data-episode="2x2"]').click();
+  await page.waitForTimeout(300);
+  const offeredOn = await page.locator('.ep-pick .play-btn').allTextContents();
+  check('with two services able, it asks which', offeredOn.join('|').replace(/›/g, '') === 'Play on HBO Max|Play on Prime Video', JSON.stringify(offeredOn));
+  check('and never offers Netflix for one episode', !offeredOn.join().includes('Netflix'));
+  await page.screenshot({ path: path.join(__dirname, 'shots', '29-tv-episode-pick.png') });
+
+  calls.length = 0;
+  autoplayPolls = 0;
+  await page.locator('.ep-pick .play-btn').first().click();
+  await page.waitForTimeout(300);
+  const epPlay = calls.find((c) => c.path === '/api/play');
+  check(
+    'the episode is sent to the TV by season, number and name',
+    epPlay && epPlay.body.serviceId === 'hbomax' && JSON.stringify(epPlay.body.episode) === JSON.stringify({ season: 2, number: 2, name: 'Through the Valley' }) && epPlay.body.item.title === 'The Last of Us',
+    JSON.stringify(epPlay && epPlay.body)
+  );
+  const epFirst = await page.locator('#toast').textContent();
+  check('it says which episode it is finding', /HBO Max: finding “The Last of Us” S2 E2/.test(epFirst), epFirst);
+  await page.waitForTimeout(5200);
+  const epDone = await page.locator('#toast').textContent();
+  check('and what the TV confirmed is playing', /▶ HBO Max: Playing Season 2, Episode 2: “Through the Valley, The Last of Us”/.test(epDone), epDone);
+
+  await page.evaluate(() => openSheet('tv', 66732));
+  await page.waitForTimeout(700);
+  const nfNote = await page.locator('.episodes .hint').textContent();
+  check('on Netflix alone, it says why an episode can’t be chosen', nfNote.includes('Netflix can’t be sent to one episode') && nfNote.includes('Continue'), nfNote);
+  check('and its episodes are listed but can’t be tapped', (await page.locator('.ep-row').count()) === 2 && await page.locator('.ep-row').first().isDisabled());
+  await page.evaluate(() => closeSheet());
 
   // Fire TV's own search can't be opened by an app; on a real TV the old
   // "Search on TV" button landed in the web browser. It must not come back.

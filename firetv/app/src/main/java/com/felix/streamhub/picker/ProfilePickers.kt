@@ -36,15 +36,31 @@ object ProfilePickers {
         val bounds: List<Int>
         val parent: Node?
         val children: List<Node>
+        /** Has the TV's highlight (input focus). */
+        val focused: Boolean get() = false
+        /** Marked as the chosen one of a list (Prime's open season list, Disney+'s season shown). */
+        val selected: Boolean get() = false
     }
 
     /**
      * The title sent from the phone, as TMDB names it. [isMovie]: a title
      * page's date is the release year for a film, but the latest season's for
      * a series (Prime showed 2026 for The Boys, TMDB says 2019), so only films
-     * are year-checked on their page.
+     * are year-checked on their page. [episode]: one episode of a series to
+     * start instead of the page's own Continue / Resume.
      */
-    data class Wanted(val title: String, val year: Int?, val isMovie: Boolean = false)
+    data class Wanted(
+        val title: String,
+        val year: Int?,
+        val isMovie: Boolean = false,
+        val episode: Episode? = null
+    )
+
+    /** An episode as TMDB numbers and names it. */
+    data class Episode(val season: Int, val number: Int, val name: String?) {
+        /** "Season 2, Episode 3", for what the phone is told. */
+        val label get() = "Season $season, Episode $number"
+    }
 
     /** A title as a service shows it; year only if the screen shows one. */
     data class Shown(val name: String, val year: Int?)
@@ -147,8 +163,89 @@ object ProfilePickers {
         val playButton: ((root: Node) -> Node?)? = null,
         /** On a title's page: its name (and year, if shown), to confirm it before Play. */
         val pageTitle: ((root: Node) -> Shown?)? = null,
+        /** On a title's page: what its Play button says it will start ("Resume Episode 8"), if it says. */
+        val playLabel: ((root: Node) -> String?)? = null,
+        /**
+         * A title's page, told apart from search results without its Play
+         * button (which can be missing, see [noResume]). Prime's results show
+         * a preview header too, so the name alone doesn't prove the page.
+         */
+        val onTitlePage: ((root: Node) -> Boolean)? = null,
+        /**
+         * The page offers no way to continue - only to start over. Seen on
+         * Prime Video: with the current episode counted as watched, its page
+         * had "Watch from beginning" and no Resume / Watch button at all.
+         */
+        val noResume: ((root: Node) -> Boolean)? = null,
+        /** On a series' page: its seasons and episodes, to start one chosen episode. */
+        val episodes: EpisodeList? = null,
         val recognise: (root: Node, name: String) -> Outcome
     )
+
+    /** A season or an episode as a series' page lists it. */
+    data class Listed(
+        val node: Node,
+        val season: Int,
+        /** Null for a season entry. */
+        val episode: Int? = null,
+        /** Where the highlight is, as far as this list shows it. */
+        val highlighted: Boolean = false,
+        /** The service's own name for the episode, where its label gives one. */
+        val name: String? = null
+    )
+
+    /**
+     * How a service's series page lists seasons and episodes. Everything the
+     * helper presses is decided from these, re-read after every press.
+     */
+    class EpisodeList(
+        /** The season whose episodes are listed now, or null if the screen doesn't say (yet). */
+        val seasonShown: (root: Node) -> Int?,
+        /**
+         * Prime Video: the drop-down that lists the seasons once OK is pressed
+         * on it. Null where the seasons are listed on the page (Disney+).
+         */
+        val seasonOpener: ((root: Node) -> Node?)? = null,
+        /**
+         * Prime Video: its Episodes tab, and whether it is the tab showing.
+         * The page has others (Explore, Related, Extras) whose rows hold no
+         * episodes. Null where there is no such tab, or it isn't on screen.
+         */
+        val episodesTab: ((root: Node) -> Pair<Node, Boolean>?)? = null,
+        /** The seasons on offer, with which one has the highlight. */
+        val seasons: (root: Node) -> List<Listed>,
+        /** The episodes on screen, with which one has the highlight. */
+        val cards: (root: Node) -> List<Listed>,
+        /** The next episode is to the Right (Prime Video's row) rather than Down (Disney+'s list). */
+        val horizontal: Boolean,
+        /**
+         * Disney+: the seasons are a column beside the episodes, so from a
+         * season the way into the episodes is this arrow. Steering there by
+         * position went Down the season column instead (seen on the TV), which
+         * shows another season. Null: steer by position.
+         */
+        val intoEpisodesFromSeasons: Arrow? = null,
+        /**
+         * Whether the media session names the episode (Prime: "BEWARE THE
+         * JABBERWOCK, MY SON"), so the one playing can be checked against the
+         * card that was pressed. Disney+ names only the show.
+         */
+        val sessionNamesEpisode: Boolean
+    )
+
+    /** An arrow key, as far as recognition is concerned. */
+    enum class Arrow { UP, DOWN, LEFT, RIGHT }
+
+    /**
+     * The arrow that moves a highlight from item [from] to item [to] of a
+     * list, by their places in it. Null once there. Places, not season or
+     * episode numbers: that is how the highlight moves.
+     */
+    fun arrowToward(from: Int, to: Int, horizontal: Boolean): Arrow? = when {
+        to > from -> if (horizontal) Arrow.RIGHT else Arrow.DOWN
+        to < from -> if (horizontal) Arrow.LEFT else Arrow.UP
+        else -> null
+    }
 
     val ALL: List<Picker> = listOf(disneyPlus(), primeVideo())
 
@@ -176,7 +273,22 @@ object ProfilePickers {
     // Endgame") and a `metadata` line with the year ("12+ 2019 • ..."). A
     // title's page names it in detailLogoImage's description, the year is in
     // detailPageMetadataRoot's, and its first button, detailPageMainButtonOne,
-    // is PLAY (focused when the page opens).
+    // is PLAY (focused when the page opens). For a series it reads CONTINUE,
+    // RESTART beside it, and resumes the episode named in
+    // detailDescriptionTitleTextView ("S1:E1 Chapter 1: The Mandalorian").
+    //
+    // Episodes: below the buttons, detailSeasonsRecyclerview lists the seasons
+    // (no view id; description "Season 2, 8 Episodes"; the one shown is
+    // `selected`) and detailSeasonEpisodesRecyclerview the episodes (`root`,
+    // "Season 2 Episode 3 Chapter 11: The Heiress., 41 minutes long., ...").
+    // Seen on the TV: moving the highlight onto a season shows its episodes
+    // (no OK needed), and OK on an episode plays it. The media session then
+    // names only the show ("The Mandalorian"), so the episode is confirmed on
+    // screen before OK, not afterwards.
+
+    private val DISNEY_SEASON = Regex("^Season (\\d+), \\d+ Episodes?$")
+    private val DISNEY_EPISODE = Regex("^Season (\\d+) Episode (\\d+)\\b")
+    private val DISNEY_EPISODE_LINE = Regex("^S\\d+:E\\d+\\b")
 
     private fun disneyPlus() = Picker(
         serviceId = "disneyplus",
@@ -196,7 +308,29 @@ object ProfilePickers {
                 val year = root.all { it.viewId.endsWith(":id/detailPageMetadataRoot") }.singleOrNull()?.let { yearIn(it.desc) }
                 Shown(name, year)
             }
-        }
+        },
+        playLabel = { root ->
+            // "CONTINUE" + "S1:E1 Chapter 1: The Mandalorian"; a film has no episode line.
+            val button = root.all { it.viewId.endsWith(":id/detailPageMainButtonOne") }.singleOrNull()
+                ?.all { it.text.isNotBlank() }?.firstOrNull()?.text?.let(::sentenceCase)
+            val episode = root.all { it.viewId.endsWith(":id/detailDescriptionTitleTextView") }.singleOrNull()?.text
+            listOfNotNull(button, episode?.takeIf { DISNEY_EPISODE_LINE.containsMatchIn(it) }).joinToString(" ").ifBlank { null }
+        },
+        episodes = EpisodeList(
+            // The episodes listed say which season they are. `selected` alone
+            // won't do: seen on the TV, while a season has the highlight none
+            // is marked selected, and the helper waited on a season it had
+            // already switched to.
+            seasonShown = { root ->
+                disneyCards(root).map { it.season }.distinct().singleOrNull()
+                    ?: disneySeasons(root).filter { it.node.selected }.singleOrNull()?.season
+            },
+            seasons = ::disneySeasons,
+            cards = ::disneyCards,
+            horizontal = false,
+            intoEpisodesFromSeasons = Arrow.RIGHT,
+            sessionNamesEpisode = false
+        )
     ) { root, name ->
         val onPicker = root.any { it.viewId.endsWith(":id/profilesContent") } &&
             root.any { it.text == "Who's watching?" }
@@ -217,6 +351,22 @@ object ProfilePickers {
         if (labels.size == 1 && tiles.size == 1) Outcome.Found(tiles[0]) else Outcome.NoSuchProfile
     }
 
+    private fun disneyCards(root: Node): List<Listed> =
+        root.all { it.viewId.endsWith(":id/detailSeasonEpisodesRecyclerview") }.flatMap { list ->
+            list.all { it.viewId.endsWith(":id/root") }.mapNotNull { card ->
+                DISNEY_EPISODE.find(card.desc)?.let {
+                    Listed(card, it.groupValues[1].toInt(), it.groupValues[2].toInt(), card.focused)
+                }
+            }
+        }
+
+    private fun disneySeasons(root: Node): List<Listed> =
+        root.all { it.viewId.endsWith(":id/detailSeasonsRecyclerview") }.flatMap { list ->
+            list.children.mapNotNull { item ->
+                DISNEY_SEASON.find(item.desc)?.let { Listed(item, it.groupValues[1].toInt(), highlighted = item.focused) }
+            }
+        }
+
     // ---- Prime Video -----------------------------------------------------
     //
     // Classic Android views with stable ids. The picker is marked by
@@ -235,6 +385,23 @@ object ProfilePickers {
     // alike, focused when the page opens. Prime lists some films twice: the
     // plain "Road House" tile opened the 2024 film, same as "Road House
     // (2024)" - which is why a film's page year is checked before Play.
+    // On a series watch_now_button reads "Resume\nEpisode 8" (or "Episode 8
+    // Watch now"): it continues where you left off.
+    //
+    // Episodes, seen on the TV (The Boys, September 2026): below the buttons
+    // are tabs, then season_drop_down showing "Season 5" (in
+    // season_spinner_collapsed_item), then a row of standard_container_card_tile
+    // named "The Boys, Season 5, Episode 8 - Blood and Bone". The row keeps
+    // the highlighted tile in its second slot and scrolls. OK on the drop-down
+    // opens a separate little window of season_spinner_expanded_item, where
+    // the highlight is shown as `selected`, Up/Down move it, and OK picks it.
+    // OK on an episode tile plays it, and the media session then names it by
+    // the tile's own name ("BEWARE THE JABBERWOCK, MY SON").
+
+    private val PRIME_EPISODE = Regex("(?:^|, )Season (\\d+), Episode (\\d+)(?: - (.+))?$")
+    private val SEASON_TEXT = Regex("^Season (\\d+)$")
+    /** "Episodes, Tab, Selected, 1 of 4" / "Episodes, Tab, 1 of 4". English UI only. */
+    private val PRIME_EPISODES_TAB = Regex("^Episodes, Tab(, Selected)?, \\d+ of \\d+$")
 
     private fun primeVideo() = Picker(
         serviceId = "primevideo",
@@ -252,7 +419,41 @@ object ProfilePickers {
                 ?: root.all { it.viewId.endsWith(":id/header_title_text") }.singleOrNull()?.text?.takeIf { it.isNotBlank() }
             val year = root.all { it.viewId.endsWith(":id/vod_original_air_date") }.singleOrNull()?.let { yearIn(it.text) }
             name?.let { Shown(withoutBadge(it), year) }
-        }
+        },
+        playLabel = { root ->
+            // "Resume\nEpisode 8, Button, 1 of 7" -> "Resume Episode 8"
+            root.all { it.viewId.endsWith(":id/watch_now_button") }.singleOrNull()?.desc
+                ?.substringBefore(", Button")?.replace(SPACES, " ")?.trim()?.ifBlank { null }
+        },
+        onTitlePage = { root -> root.any { it.viewId.endsWith(":id/detail_page_layout") } },
+        noResume = { root ->
+            root.any { it.viewId.endsWith(":id/detail_page_layout") } &&
+                root.none { it.viewId.endsWith(":id/watch_now_button") } &&
+                root.any { it.viewId.endsWith(":id/fable_button_text") && it.text.replace(SPACES, " ").startsWith("Watch from beginning") }
+        },
+        episodes = EpisodeList(
+            seasonShown = { root ->
+                // The drop-down says, once it has scrolled into view. Before
+                // that, the page already shows a few of that season's tiles.
+                root.all { it.viewId.endsWith(":id/season_spinner_collapsed_item") }.singleOrNull()
+                    ?.let { seasonIn(it) }
+                    ?: primeCards(root).map { it.season }.distinct().singleOrNull()
+            },
+            seasonOpener = { root -> root.all { it.viewId.endsWith(":id/season_drop_down") }.singleOrNull() },
+            episodesTab = { root ->
+                // No-break spaces after its commas, as in the tiles.
+                fun label(n: Node) = n.desc.replace(SPACES, " ").trim()
+                root.all { PRIME_EPISODES_TAB.matches(label(it)) }.singleOrNull()?.let { it to label(it).contains(", Selected,") }
+            },
+            seasons = { root ->
+                root.all { it.viewId.endsWith(":id/season_spinner_expanded_item") }.mapNotNull { item ->
+                    seasonIn(item)?.let { Listed(item, it, highlighted = item.selected) }
+                }
+            },
+            cards = ::primeCards,
+            horizontal = true,
+            sessionNamesEpisode = true
+        )
     ) { root, name ->
         if (!root.any { it.viewId.endsWith(":id/whos_watching_heading") }) return@Picker Outcome.NotPicker
 
@@ -263,6 +464,19 @@ object ProfilePickers {
         }
         if (matches.size == 1) Outcome.Found(matches[0]) else Outcome.NoSuchProfile
     }
+
+    private fun primeCards(root: Node): List<Listed> =
+        root.all { it.viewId.endsWith(":id/standard_container_card_tile") }.mapNotNull { tile ->
+            // Prime puts no-break spaces in its labels (see [fold]).
+            PRIME_EPISODE.find(tile.desc.replace(SPACES, " ").trim())?.let {
+                Listed(tile, it.groupValues[1].toInt(), it.groupValues[2].toInt(), tile.focused, it.groupValues[3].ifBlank { null })
+            }
+        }
+
+    /** "Season 4" in any text below [n]. */
+    private fun seasonIn(n: Node): Int? =
+        n.all { SEASON_TEXT.matches(it.text.replace(SPACES, " ").trim()) }.singleOrNull()
+            ?.let { SEASON_TEXT.find(it.text.replace(SPACES, " ").trim())!!.groupValues[1].toInt() }
 
     // ---- HBO Max (blind) -------------------------------------------------
     //
@@ -278,6 +492,14 @@ object ProfilePickers {
     //    OK there plays.
     //  - While playing, the media session names it: "When You're Lost in the
     //    Darkness, The Last of Us" (episode, then show).
+    //  - A series' page (The Last of Us, True Detective, Chernobyl): Down goes
+    //    to the Episodes tab; Down again to a row of season numbers - only
+    //    when there is more than one season - which opens on the season last
+    //    watched (True Detective: 4). Moving onto a season shows its episodes;
+    //    Left stops at the first season. Down from there (or from the tab,
+    //    with one season) enters the episode row on its first episode; Left
+    //    stops at the first episode, and never reaches the side menu. OK on an
+    //    episode plays it.
 
     /**
      * HBO Max's and Netflix's on-screen keyboards, which are laid out the same
@@ -313,6 +535,44 @@ object ProfilePickers {
     object Hbo {
         const val SERVICE_ID = "hbomax"
         const val SEARCH_LINK = "https://play.max.com/search"
+        /** Enough Lefts to reach the first of anything HBO Max lists; Left stops there. */
+        const val MAX_LEFTS = 30
+
+        /**
+         * The presses from a series' page (its Watch / Resume button
+         * highlighted) to [episode], ready for OK. Blind, so it never counts
+         * from where the highlight happens to be: it runs Left to the start of
+         * each row first. [seasons] and [episodesInSeason] are TMDB's counts,
+         * which only size those runs and decide whether there is a season row;
+         * if HBO Max disagrees, the wrong thing is caught afterwards by name.
+         * Null if the episode can't be reached this way.
+         */
+        fun episodeRoute(episode: Episode, seasons: Int, episodesInSeason: Int): List<Arrow>? {
+            if (episode.season !in 1..seasons || episode.number < 1) return null
+            val keys = mutableListOf(Arrow.DOWN) // the Episodes tab
+            if (seasons > 1) {
+                keys += Arrow.DOWN // the season row
+                repeat(minOf(seasons, MAX_LEFTS)) { keys += Arrow.LEFT }
+                repeat(episode.season - 1) { keys += Arrow.RIGHT }
+            }
+            keys += Arrow.DOWN // the episode row
+            repeat(minOf(maxOf(episodesInSeason, episode.number), MAX_LEFTS)) { keys += Arrow.LEFT }
+            repeat(episode.number - 1) { keys += Arrow.RIGHT }
+            return keys
+        }
+    }
+
+    /**
+     * Whether a media session's description ("The Path, The Last of Us")
+     * names episode [episodeName] of [show]: exactly that episode's name,
+     * then the show's (words only). Exact, so "Night Country: Part 1" is not
+     * taken for "Night Country: Part 10".
+     */
+    fun namesEpisode(description: String, show: String, episodeName: String?): Boolean {
+        val e = words(episodeName ?: return false)
+        val s = words(show)
+        if (e.isEmpty() || s.isEmpty()) return false
+        return words(description) == "$e $s"
     }
 
     // ---- Netflix (blind, and it never says what it plays) ------------------
@@ -359,6 +619,9 @@ object ProfilePickers {
     }
 
     // ---- helpers ---------------------------------------------------------
+
+    /** "CONTINUE" -> "Continue", for a button label passed on to the phone. */
+    private fun sentenceCase(s: String) = s.trim().lowercase(Locale.ROOT).replaceFirstChar { it.titlecase(Locale.ROOT) }
 
     /**
      * Prime's tile text minus a trailing ", <BADGE>". Badges are capitals
@@ -408,4 +671,6 @@ object ProfilePickers {
     }
 
     private fun Node.any(pred: (Node) -> Boolean): Boolean = all(pred).isNotEmpty()
+
+    private fun Node.none(pred: (Node) -> Boolean): Boolean = !any(pred)
 }

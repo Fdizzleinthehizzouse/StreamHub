@@ -81,11 +81,18 @@ data class Ratings(
 /** Which of our four services carries a title, and on what terms. */
 data class Availability(val serviceId: String, val included: Boolean)
 
+/** One season of a series, as TMDB numbers it. Season 0 (specials) is left out. */
+data class SeasonInfo(val number: Int, val name: String, val episodeCount: Int, val airDate: String?)
+
+/** One episode, as TMDB numbers and names it. */
+data class EpisodeInfo(val number: Int, val name: String, val runtime: Int?, val airDate: String?)
+
 data class TitleDetail(
     val title: Title,
     val runtime: Int?,
     val seasons: Int?,
     val episodes: Int?,
+    val seasonList: List<SeasonInfo> = emptyList(),
     val genres: List<String>,
     val directors: List<String>,
     val cast: List<CastMember>,

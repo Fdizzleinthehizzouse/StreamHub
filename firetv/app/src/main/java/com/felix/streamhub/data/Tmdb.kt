@@ -125,6 +125,7 @@ class Tmdb(private val store: Store) {
             runtime = runtime,
             seasons = d.optIntOrNull("number_of_seasons"),
             episodes = d.optIntOrNull("number_of_episodes"),
+            seasonList = seasonsFrom(d),
             genres = d.optJSONArray("genres").objects().map { it.optString("name") },
             directors = directors,
             cast = cast,
@@ -135,6 +136,10 @@ class Tmdb(private val store: Store) {
             ratings = null // filled in by Omdb, which is optional
         )
     }
+
+    /** The episodes of one season of series [id]. */
+    suspend fun season(id: Int, season: Int): List<EpisodeInfo> =
+        episodesFrom(Http.getJson(url("/tv/$id/season/$season")))
 
     // ---- discovery ---------------------------------------------------------
 
@@ -224,6 +229,38 @@ class Tmdb(private val store: Store) {
             params.putAll(extra)
             return params
         }
+
+        /**
+         * A series' seasons from its details. Season 0 is TMDB's "Specials",
+         * which the services list elsewhere or not at all, so it is left out:
+         * counting it would put every season one place off on HBO Max, which
+         * is driven by counting.
+         */
+        fun seasonsFrom(details: JSONObject): List<SeasonInfo> =
+            details.optJSONArray("seasons").objects()
+                .filter { it.optInt("season_number") > 0 }
+                .map {
+                    SeasonInfo(
+                        it.optInt("season_number"),
+                        it.optStringOrNull("name") ?: "Season ${it.optInt("season_number")}",
+                        it.optInt("episode_count"),
+                        it.optStringOrNull("air_date")
+                    )
+                }
+                .sortedBy { it.number }
+
+        fun episodesFrom(season: JSONObject): List<EpisodeInfo> =
+            season.optJSONArray("episodes").objects()
+                .filter { it.optInt("episode_number") > 0 }
+                .map {
+                    EpisodeInfo(
+                        it.optInt("episode_number"),
+                        it.optStringOrNull("name") ?: "Episode ${it.optInt("episode_number")}",
+                        it.optIntOrNull("runtime"),
+                        it.optStringOrNull("air_date")
+                    )
+                }
+                .sortedBy { it.number }
 
         /** Subscription beats rent: a service that has it included is listed as included. */
         fun availabilityFrom(regionProviders: JSONObject?, ids: Map<String, Set<Int>>): List<Availability> {
