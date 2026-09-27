@@ -193,7 +193,17 @@ read their screen. (HBO Max autoplay uses the key helper alone.) It acts only ri
 only sees Disney+ and Prime Video's screens, and records nothing.
 
 Fire TV has no settings screen for this, so it's switched on from the computer,
-once. First check nothing else is using it:
+once.
+
+The commands below need a terminal that can find `adb`, and Android Studio
+doesn't put it anywhere a terminal looks. On Windows, paste
+`%LOCALAPPDATA%\Android\Sdk\platform-tools` into File Explorer's address bar
+and press Enter, then type `cmd` in that same address bar: the terminal that
+opens can run `adb`. If you installed StreamHub with Downloader rather than
+from this computer, connect to the TV first with `adb connect 192.168.1.42`
+(your TV's address) and say yes on the TV.
+
+First check nothing else is using it:
 
 ```
 adb shell settings get secure enabled_accessibility_services

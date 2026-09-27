@@ -172,6 +172,24 @@ The instructions, including the exact commands to paste, are in
 **`firetv/README.md`, Steps 4 and 5**. They're kept off this page deliberately:
 everything here can be done from the sofa, and that one can't.
 
+**What the computer needs.** A Windows computer on the same wifi as the TV,
+with two things on it:
+
+- **Android Studio**, free from <https://developer.android.com/studio>. You
+  won't build anything with it. It brings along `adb`, the small tool that
+  talks to the TV over its developer connection, and StreamHub's helper script
+  looks for `adb` where Android Studio puts it. Install it with the defaults,
+  then **open it once and let its first-time setup finish** — that setup is
+  what fetches `adb`. It's a large download, over a gigabyte.
+- **StreamHub's own files**, which contain the helper script. On
+  <https://github.com/Fdizzleinthehizzouse/StreamHub>, press the green **Code**
+  button, then **Download ZIP**, and unzip it. The script is
+  `firetv\start-key-helper.bat`.
+
+The TV needs **ADB debugging** switched on (Step 1), and you'll need its
+address, from **Settings → My Fire TV → About → Network** (it looks like
+`192.168.1.42`).
+
 **If you skip Step 6, StreamHub still works.** You get your title's search
 results on each service and press OK yourself. Nothing is broken — it's one
 press instead of none.
